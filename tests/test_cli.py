@@ -2642,6 +2642,45 @@ def test_check_local_uses_bundled_pipeline_by_default(monkeypatch):
     assert captured["wait_timeout"] is None
 
 
+def test_check_local_reuses_preflight_loaded_pipeline(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeOrchestrator:
+        async def submit(self, pipeline: object):
+            captured["submitted_pipeline"] = pipeline
+            return SimpleNamespace(id="check-local-reuse")
+
+        async def wait(self, run_id: str, timeout: float | None = None):
+            return _completed_run(run_id, pipeline_name="local-real-agents-kimi-smoke")
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_runtime",
+        lambda runs_dir, max_concurrent_runs: (SimpleNamespace(run_dir=lambda run_id: Path(runs_dir) / run_id), FakeOrchestrator()),
+    )
+    monkeypatch.setattr(agentflow.cli, "default_smoke_pipeline_path", lambda: "examples/local-real-agents-kimi-smoke.yaml")
+
+    loaded_pipelines = [object(), object()]
+
+    def fake_load(path: str):
+        captured["loaded_path"] = path
+        captured["load_calls"] = int(captured.get("load_calls", 0)) + 1
+        pipeline = loaded_pipelines.pop(0)
+        captured.setdefault("loaded_pipelines", []).append(pipeline)
+        return pipeline
+
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", fake_load)
+
+    result = runner.invoke(app, ["check-local"])
+
+    assert result.exit_code == 0
+    assert captured["loaded_path"] == "examples/local-real-agents-kimi-smoke.yaml"
+    assert captured["load_calls"] == 1
+    assert captured["submitted_pipeline"] is captured["loaded_pipelines"][0]
+    assert len(loaded_pipelines) == 1
+
+
 def test_check_local_uses_json_doctor_output_when_run_output_is_json(monkeypatch):
     class FakeOrchestrator:
         async def submit(self, pipeline: object):

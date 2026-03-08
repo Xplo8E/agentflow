@@ -1005,7 +1005,7 @@ def check_local(
     )
     if report.status == "failed":
         raise typer.Exit(code=1)
-    _run_pipeline(_load_pipeline(selected_path), runs_dir, max_concurrent_runs, output)
+    _run_pipeline(_loaded_pipeline if _loaded_pipeline is not None else _load_pipeline(selected_path), runs_dir, max_concurrent_runs, output)
 
 
 @app.command()
