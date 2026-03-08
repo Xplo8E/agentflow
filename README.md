@@ -52,6 +52,12 @@ Run the bundled real-agent smoke check:
 agentflow smoke
 ```
 
+Check the local Codex/Claude/Kimi smoke prerequisites without launching a run:
+
+```bash
+agentflow doctor
+```
+
 Run the web console:
 
 ```bash
@@ -236,7 +242,16 @@ Run a real local smoke check with your installed CLIs:
 agentflow smoke
 ```
 
-This keeps the check small while exercising both local `codex` and local `claude` end-to-end. The bundled smoke pipeline bootstraps the `kimi` shell helper inside the Claude node, so you do not need to wrap the entire `agentflow smoke` command in `bash -lic`. If you want to run a custom smoke pipeline instead, pass its path explicitly with `agentflow smoke path/to/pipeline.yaml`.
+This keeps the check small while exercising both local `codex` and local `claude` end-to-end. Before the bundled smoke pipeline starts, AgentFlow runs a local preflight that verifies `codex`, `claude`, and the `kimi` shell helper are all available, and it reports which bash login startup file is active if the preflight fails.
+
+You can run the same preflight directly:
+
+```bash
+. .venv/bin/activate
+agentflow doctor
+```
+
+The bundled smoke pipeline bootstraps the `kimi` shell helper inside the Claude node, so you do not need to wrap the entire `agentflow smoke` command in `bash -lic`. If you want to run a custom smoke pipeline instead, pass its path explicitly with `agentflow smoke path/to/pipeline.yaml`.
 
 ## Reference sources
 
