@@ -33,6 +33,8 @@ python3 -m venv .venv
 pip install -e .[dev]
 ```
 
+After installation, you can invoke the CLI either as `agentflow ...` or `python -m agentflow ...`.
+
 ## Quick start
 
 Validate a pipeline:
