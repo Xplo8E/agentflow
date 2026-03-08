@@ -671,7 +671,41 @@ def test_local_smoke_doctor_report_fails_when_codex_is_not_logged_in_after_kimi_
     assert report.as_dict()["checks"][-1] == {
         "name": "kimi_shell_helper",
         "status": "failed",
-        "detail": "`kimi` runs in `bash -lic`, and `codex` is on PATH afterwards, but `codex login status` still fails; make sure Codex is logged in or `OPENAI_API_KEY` is exported in that shared smoke shell.",
+        "detail": "`kimi` runs in `bash -lic`, and `codex` is on PATH afterwards, but neither `codex login status` succeeds nor `OPENAI_API_KEY` is exported; make sure Codex is logged in or `OPENAI_API_KEY` is exported in that shared smoke shell.",
+    }
+
+
+def test_local_smoke_doctor_report_accepts_openai_api_key_when_codex_login_status_is_unavailable(
+    tmp_path: Path,
+    monkeypatch,
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
+    (home / ".bashrc").write_text("kimi(){ :; }\n", encoding="utf-8")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "super-secret")
+    monkeypatch.setattr("agentflow.doctor.shutil.which", lambda name: f"/tmp/{name}")
+
+    def fake_run(*args, **kwargs):
+        command = args[0]
+        if command[:2] == ["bash", "-lic"]:
+            assert 'codex login status >/dev/null 2>&1 || [ -n "${OPENAI_API_KEY:-}" ]' in command[2]
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("agentflow.doctor.subprocess.run", fake_run)
+
+    report = build_local_smoke_doctor_report(home=home)
+
+    assert report.status == "ok"
+    assert report.as_dict()["checks"][-1] == {
+        "name": "kimi_shell_helper",
+        "status": "ok",
+        "detail": (
+            "`kimi` is available in `bash -lic`, exports `ANTHROPIC_API_KEY`, "
+            "sets `ANTHROPIC_BASE_URL=https://api.kimi.com/coding/`, keeps both `claude` and `codex` available, "
+            "and confirms Codex authentication is ready via `codex login status` or `OPENAI_API_KEY` for the bundled smoke pipeline."
+        ),
     }
 
 
