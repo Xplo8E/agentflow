@@ -6,7 +6,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agentflow.local_shell import invalid_bash_long_option_error
 
@@ -146,7 +146,25 @@ class LocalTarget(BaseModel):
     shell: str | None = None
     shell_login: bool = False
     shell_interactive: bool = False
-    shell_init: str | None = None
+    shell_init: str | list[str] | None = None
+
+    @field_validator("shell_init")
+    @classmethod
+    def validate_shell_init(cls, value: str | list[str] | None) -> str | list[str] | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                raise ValueError("`target.shell_init` must not be empty")
+            return normalized
+
+        normalized_commands = [command.strip() for command in value if command.strip()]
+        if not normalized_commands:
+            raise ValueError("`target.shell_init` must contain at least one non-empty command")
+        if len(normalized_commands) != len(value):
+            raise ValueError("`target.shell_init` list entries must be non-empty strings")
+        return normalized_commands
 
     @model_validator(mode="after")
     def validate_shell_bootstrap(self) -> "LocalTarget":

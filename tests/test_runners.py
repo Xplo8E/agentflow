@@ -156,6 +156,41 @@ async def test_local_runner_shell_init_runs_in_login_interactive_shell(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_local_runner_shell_init_list_runs_commands_in_order(tmp_path: Path):
+    shell_env = tmp_path / "shell.env"
+    shell_env.write_text(
+        "prepare(){ export SHELL_INIT_STEP=ordered; }\n"
+        "kimi(){ export WRAPPED_VALUE=${SHELL_INIT_STEP}-ok; }\n",
+        encoding="utf-8",
+    )
+
+    node = NodeSpec.model_validate(
+        {
+            "id": "gamma-list",
+            "agent": "claude",
+            "prompt": "hi",
+            "target": {
+                "kind": "local",
+                "shell": f"env BASH_ENV={shell_env} bash -c",
+                "shell_init": ["prepare", "kimi"],
+            },
+        }
+    )
+    prepared = PreparedExecution(
+        command=["bash", "-lc", 'printf "%s" "$WRAPPED_VALUE"'],
+        env={},
+        cwd=str(tmp_path),
+        trace_kind="claude",
+    )
+
+    result = await LocalRunner().execute(node, prepared, _paths(tmp_path), _noop_output, lambda: False)
+
+    assert result.exit_code == 0
+    assert result.stdout_lines[-1] == "ordered-ok"
+    assert result.stderr_lines == []
+
+
+@pytest.mark.asyncio
 async def test_local_runner_explicit_bash_lic_suppresses_job_control_noise(tmp_path: Path):
     fake_home = tmp_path / "home"
     fake_home.mkdir()

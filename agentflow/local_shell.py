@@ -47,6 +47,26 @@ def _is_command_flag(part: str) -> bool:
     return part == "--command" or (part.startswith("-") and not part.startswith("--") and "c" in part[1:])
 
 
+def shell_init_commands(shell_init: Any) -> tuple[str, ...]:
+    if isinstance(shell_init, str):
+        normalized = shell_init.strip()
+        return (normalized,) if normalized else ()
+    if isinstance(shell_init, (list, tuple)):
+        return tuple(command.strip() for command in shell_init if isinstance(command, str) and command.strip())
+    return ()
+
+
+def render_shell_init(shell_init: Any) -> str | None:
+    commands = shell_init_commands(shell_init)
+    if not commands:
+        return None
+    return " && ".join(commands)
+
+
+def shell_init_uses_kimi_helper(shell_init: Any) -> bool:
+    return any(shell_command_uses_kimi_helper(command) for command in shell_init_commands(shell_init))
+
+
 def _looks_like_kimi_token(token: str) -> bool:
     stripped = token.strip().lstrip("({[").rstrip(";|&)}]\n\r\t ")
     if not stripped:
@@ -182,7 +202,7 @@ def kimi_shell_init_requires_interactive_bash_warning(target: Any) -> str | None
         return None
 
     shell_init = _target_value(target, "shell_init")
-    if shell_command_uses_kimi_helper(shell_init if isinstance(shell_init, str) else None):
+    if shell_init_uses_kimi_helper(shell_init):
         return _kimi_bootstrap_without_interactive_bash_warning("target.shell_init")
 
     shell = _target_value(target, "shell")

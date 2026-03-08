@@ -37,3 +37,16 @@ def test_kimi_shell_init_requires_interactive_bash_warning_ignores_probe_only_sh
     }
 
     assert kimi_shell_init_requires_interactive_bash_warning(target) is None
+
+
+def test_kimi_shell_init_requires_interactive_bash_warning_supports_shell_init_lists():
+    target = {
+        "kind": "local",
+        "shell": "bash",
+        "shell_init": ["command -v kimi >/dev/null 2>&1", "kimi"],
+    }
+
+    assert kimi_shell_init_requires_interactive_bash_warning(target) == (
+        "`shell_init: kimi` uses bash without interactive startup; helpers from `~/.bashrc` are usually "
+        "unavailable. Set `target.shell_interactive: true` or use `bash -lic`."
+    )

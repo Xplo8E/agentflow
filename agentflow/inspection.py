@@ -4,7 +4,7 @@ import shlex
 from pathlib import Path
 from typing import Any
 
-from agentflow.local_shell import kimi_shell_init_requires_interactive_bash_warning
+from agentflow.local_shell import kimi_shell_init_requires_interactive_bash_warning, render_shell_init
 from agentflow.agents.registry import AdapterRegistry, default_adapter_registry
 from agentflow.context import render_node_prompt
 from agentflow.prepared import build_execution_paths
@@ -162,7 +162,7 @@ def _bootstrap_summary(target: dict[str, Any]) -> str | None:
     if target.get("shell_interactive"):
         parts.append("interactive=true")
 
-    shell_init = target.get("shell_init")
+    shell_init = render_shell_init(target.get("shell_init"))
     if shell_init:
         parts.append(f"init={shell_init}")
 

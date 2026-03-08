@@ -5,7 +5,7 @@ import os
 import shlex
 from contextlib import suppress
 
-from agentflow.local_shell import target_uses_interactive_bash
+from agentflow.local_shell import render_shell_init, target_uses_interactive_bash
 from agentflow.prepared import ExecutionPaths, PreparedExecution
 from agentflow.runners.base import LaunchPlan, RawExecutionResult, Runner, StreamCallback
 from agentflow.specs import LocalTarget, NodeSpec
@@ -50,8 +50,9 @@ class LocalRunner(Runner):
 
         command_text = shlex.join(prepared.command)
         shell_command = 'eval "$AGENTFLOW_TARGET_COMMAND"'
-        if target.shell_init:
-            shell_command = f"{target.shell_init} && {shell_command}"
+        shell_init = render_shell_init(target.shell_init)
+        if shell_init:
+            shell_command = f"{shell_init} && {shell_command}"
 
         if "{command}" in target.shell:
             placeholder = "__AGENTFLOW_COMMAND_PLACEHOLDER__"
@@ -78,7 +79,7 @@ class LocalRunner(Runner):
         if command_index is None:
             shell_parts.append("-c")
 
-        if target.shell_init:
+        if shell_init:
             shell_parts.append(shell_command)
             return shell_parts, {"AGENTFLOW_TARGET_COMMAND": command_text}
 

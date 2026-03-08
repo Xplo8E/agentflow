@@ -386,6 +386,34 @@ nodes:
     }
 
 
+def test_inspect_command_supports_shell_init_command_lists(tmp_path):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-shell-init-list
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    prompt: hi
+    target:
+      kind: local
+      shell: bash
+      shell_login: true
+      shell_interactive: true
+      shell_init:
+        - command -v kimi >/dev/null 2>&1
+        - kimi
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path)])
+
+    assert result.exit_code == 0
+    assert "Auto preflight matches: review (claude) via `target.shell_init`" in result.stdout
+    assert "Bootstrap: shell=bash, login=true, interactive=true, init=command -v kimi >/dev/null 2>&1 && kimi" in result.stdout
+
+
 def test_inspect_command_ignores_kimi_probe_commands_in_auto_preflight(tmp_path):
     pipeline_path = tmp_path / "pipeline.yaml"
     pipeline_path.write_text(
@@ -951,6 +979,51 @@ def test_run_auto_runs_preflight_for_custom_pipeline_with_kimi_shell_init(monkey
     assert captured["loaded_path"] == "custom-run.yaml"
     assert captured["submitted_pipeline"] is fake_pipeline
     assert captured["wait_run_id"] == "run-custom-kimi"
+    assert captured["wait_timeout"] is None
+
+
+def test_run_auto_runs_preflight_for_custom_pipeline_with_shell_init_command_list(monkeypatch):
+    captured: dict[str, object] = {}
+    doctor_calls = 0
+
+    class FakeOrchestrator:
+        async def submit(self, pipeline: object):
+            captured["submitted_pipeline"] = pipeline
+            return SimpleNamespace(id="run-custom-kimi-shell-init-list")
+
+        async def wait(self, run_id: str, timeout: float | None = None):
+            captured["wait_run_id"] = run_id
+            captured["wait_timeout"] = timeout
+            return _completed_run(run_id, pipeline_name="custom-kimi-shell-init-list")
+
+    def fake_doctor_report():
+        nonlocal doctor_calls
+        doctor_calls += 1
+        return _doctor_report()
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", fake_doctor_report)
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_runtime",
+        lambda runs_dir, max_concurrent_runs: (SimpleNamespace(run_dir=lambda run_id: Path(runs_dir) / run_id), FakeOrchestrator()),
+    )
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                agent=SimpleNamespace(value="codex"),
+                target=SimpleNamespace(kind="local", shell="bash", shell_init=["command -v kimi >/dev/null 2>&1", "kimi"]),
+            )
+        ]
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["run", "custom-run.yaml"])
+
+    assert result.exit_code == 0
+    assert doctor_calls == 1
+    assert captured["loaded_path"] == "custom-run.yaml"
+    assert captured["submitted_pipeline"] is fake_pipeline
+    assert captured["wait_run_id"] == "run-custom-kimi-shell-init-list"
     assert captured["wait_timeout"] is None
 
 

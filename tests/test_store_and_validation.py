@@ -42,6 +42,7 @@ def test_pipeline_validation_rejects_codex_kimi_provider_alias():
         ({"shell_login": True}, "shell_login"),
         ({"shell_interactive": True}, "shell_interactive"),
         ({"shell_init": "kimi"}, "shell_init"),
+        ({"shell_init": ["kimi"]}, "shell_init"),
     ],
 )
 def test_pipeline_validation_rejects_local_shell_bootstrap_without_shell(target_patch, expected_field):
@@ -120,6 +121,51 @@ def test_pipeline_validation_accepts_supported_bash_long_options_with_separate_v
     )
 
     assert pipeline.nodes[0].target.shell == "bash --rcfile $HOME/.bashrc -ic 'kimi && {command}'"
+
+
+def test_pipeline_validation_accepts_shell_init_command_lists():
+    pipeline = PipelineSpec.model_validate(
+        {
+            "name": "valid-shell-init-list",
+            "working_dir": ".",
+            "nodes": [
+                {
+                    "id": "plan",
+                    "agent": "claude",
+                    "prompt": "plan",
+                    "target": {
+                        "kind": "local",
+                        "shell": "bash",
+                        "shell_init": [" command -v kimi >/dev/null 2>&1 ", " kimi "],
+                    },
+                },
+            ],
+        }
+    )
+
+    assert pipeline.nodes[0].target.shell_init == ["command -v kimi >/dev/null 2>&1", "kimi"]
+
+
+def test_pipeline_validation_rejects_empty_shell_init_list_entries():
+    with pytest.raises(ValidationError, match="non-empty strings"):
+        PipelineSpec.model_validate(
+            {
+                "name": "invalid-shell-init-list",
+                "working_dir": ".",
+                "nodes": [
+                    {
+                        "id": "plan",
+                        "agent": "claude",
+                        "prompt": "plan",
+                        "target": {
+                            "kind": "local",
+                            "shell": "bash",
+                            "shell_init": ["kimi", "   "],
+                        },
+                    },
+                ],
+            }
+        )
 
 
 @pytest.mark.parametrize(
