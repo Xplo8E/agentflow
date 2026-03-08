@@ -42,7 +42,7 @@ def _strip_shell_comments(line: str) -> str:
     return "".join(result)
 
 
-def _shell_sources_file(text: str, filename: str) -> bool:
+def _shell_sources_file(text: str, filename: str, home: Path | None = None) -> bool:
     for raw_line in text.splitlines():
         line = _strip_shell_comments(raw_line).strip()
         if not line:
@@ -54,12 +54,12 @@ def _shell_sources_file(text: str, filename: str) -> bool:
         for index, token in enumerate(tokens[:-1]):
             if token not in {"source", "."}:
                 continue
-            if _shell_source_target_matches(tokens[index + 1], filename):
+            if _shell_source_target_matches(tokens[index + 1], filename, home=home):
                 return True
     return False
 
 
-def _shell_source_target_matches(token: str, filename: str) -> bool:
+def _shell_source_target_matches(token: str, filename: str, home: Path | None = None) -> bool:
     normalized = token.rstrip(";)")
     accepted_targets = {
         filename,
@@ -67,6 +67,8 @@ def _shell_source_target_matches(token: str, filename: str) -> bool:
         f"$HOME/{filename}",
         f"${{HOME}}/{filename}",
     }
+    if home is not None:
+        accepted_targets.add(str((home / filename).resolve()))
     return normalized in accepted_targets
 
 
@@ -174,7 +176,7 @@ def _bash_startup_chain_to_bashrc(
         return None
 
     text = startup_file.read_text(encoding="utf-8", errors="ignore")
-    if _shell_sources_file(text, ".bashrc"):
+    if _shell_sources_file(text, ".bashrc", home=home):
         return (name, ".bashrc")
 
     next_seen = seen | {name}
@@ -182,7 +184,7 @@ def _bash_startup_chain_to_bashrc(
         if filename == name or filename in next_seen:
             continue
         candidate = home / filename
-        if not candidate.exists() or not _shell_sources_file(text, filename):
+        if not candidate.exists() or not _shell_sources_file(text, filename, home=home):
             continue
         chain = _bash_startup_chain_to_bashrc(home, candidate, next_seen)
         if chain is not None:
