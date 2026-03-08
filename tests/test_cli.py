@@ -1816,6 +1816,56 @@ def test_smoke_auto_runs_preflight_for_custom_pipeline_with_kimi_shell_init(monk
     assert captured["wait_timeout"] is None
 
 
+def test_smoke_auto_runs_preflight_for_custom_claude_kimi_provider_without_host_anthropic_key(monkeypatch):
+    captured: dict[str, object] = {}
+    doctor_calls = 0
+
+    class FakeOrchestrator:
+        async def submit(self, pipeline: object):
+            captured["submitted_pipeline"] = pipeline
+            return SimpleNamespace(id="smoke-custom-claude-kimi-provider")
+
+        async def wait(self, run_id: str, timeout: float | None = None):
+            captured["wait_run_id"] = run_id
+            captured["wait_timeout"] = timeout
+            return _completed_run(run_id, pipeline_name="custom-claude-kimi-provider-smoke")
+
+    def fake_doctor_report():
+        nonlocal doctor_calls
+        doctor_calls += 1
+        return _doctor_report()
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", fake_doctor_report)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_runtime",
+        lambda runs_dir, max_concurrent_runs: (SimpleNamespace(run_dir=lambda run_id: Path(runs_dir) / run_id), FakeOrchestrator()),
+    )
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="claude_review",
+                agent=SimpleNamespace(value="claude"),
+                provider="kimi",
+                env={},
+                target=SimpleNamespace(kind="local", shell="bash", shell_init="kimi", shell_interactive=True),
+            )
+        ]
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["smoke", "custom-smoke.yaml"])
+
+    assert result.exit_code == 0
+    assert doctor_calls == 1
+    assert captured["loaded_path"] == "custom-smoke.yaml"
+    assert captured["submitted_pipeline"] is fake_pipeline
+    assert captured["wait_run_id"] == "smoke-custom-claude-kimi-provider"
+    assert captured["wait_timeout"] is None
+
+
 def test_smoke_auto_runs_preflight_for_custom_pipeline_with_kimi_agent(monkeypatch):
     captured: dict[str, object] = {}
     doctor_calls = 0
@@ -2270,6 +2320,37 @@ def test_doctor_with_pipeline_path_fails_when_kimi_node_is_missing_kimi_api_key(
         "- kimi_shell_helper: ok - ready\n"
         "- provider_credentials: failed - Node `kimi_review` (kimi) requires `KIMI_API_KEY` for provider `moonshot`, but it is not set in the current environment, `node.env`, or `provider.env`.\n"
         "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
+    )
+
+
+def test_doctor_with_pipeline_path_accepts_claude_kimi_provider_credentials_from_kimi_bootstrap(monkeypatch):
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="claude_review",
+                agent=SimpleNamespace(value="claude"),
+                provider="kimi",
+                env={},
+                target=SimpleNamespace(kind="local", shell="bash", shell_init="kimi", shell_interactive=True),
+            )
+        ]
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["doctor", "custom-smoke.yaml", "--output", "summary"])
+
+    assert result.exit_code == 0
+    assert captured["loaded_path"] == "custom-smoke.yaml"
+    assert result.stdout == (
+        "Doctor: ok\n"
+        "- kimi_shell_helper: ok - ready\n"
+        "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
+        "Pipeline auto preflight matches: claude_review (claude) via `target.shell_init`\n"
     )
 
 

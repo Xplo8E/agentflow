@@ -447,6 +447,17 @@ def _resolved_provider_api_key_env(node: object) -> tuple[str | None, str | None
     return None, None
 
 
+def _provider_credentials_come_from_kimi_bootstrap(
+    node: object,
+    *,
+    api_key_env: str,
+    provider_name: str | None,
+) -> bool:
+    if api_key_env != "ANTHROPIC_API_KEY" or provider_name != "kimi":
+        return False
+    return _node_uses_kimi_smoke_bootstrap(node)
+
+
 def _pipeline_provider_credential_checks(pipeline: object) -> list[DoctorCheck]:
     checks: list[DoctorCheck] = []
     for node in getattr(pipeline, "nodes", None) or []:
@@ -462,6 +473,12 @@ def _pipeline_provider_credential_checks(pipeline: object) -> list[DoctorCheck]:
             isinstance(source, dict) and str(source.get(api_key_env, "")).strip()
             for source in (node_env, provider_env)
         ) or bool(str(os.getenv(api_key_env, "")).strip())
+        if not has_key and _provider_credentials_come_from_kimi_bootstrap(
+            node,
+            api_key_env=api_key_env,
+            provider_name=provider_name,
+        ):
+            has_key = True
         if has_key:
             continue
 
