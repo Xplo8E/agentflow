@@ -193,6 +193,45 @@ def test_smoke_uses_bundled_pipeline_by_default(monkeypatch):
     assert captured["wait_timeout"] is None
 
 
+def test_smoke_runs_when_bundled_preflight_warns(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeOrchestrator:
+        async def submit(self, pipeline: object):
+            captured["submitted_pipeline"] = pipeline
+            return SimpleNamespace(id="smoke-warning")
+
+        async def wait(self, run_id: str, timeout: float | None = None):
+            captured["wait_run_id"] = run_id
+            captured["wait_timeout"] = timeout
+            return SimpleNamespace(
+                status=SimpleNamespace(value="completed"),
+                model_dump=lambda mode="json": {"id": run_id, "status": "completed"},
+            )
+
+    monkeypatch.setattr(
+        agentflow.cli,
+        "build_local_smoke_doctor_report",
+        lambda: DoctorReport(
+            status="warning",
+            checks=[DoctorCheck(name="claude", status="warning", detail="bootstrap-only")],
+        ),
+    )
+    monkeypatch.setattr(agentflow.cli, "_build_runtime", lambda runs_dir, max_concurrent_runs: (object(), FakeOrchestrator()))
+    monkeypatch.setattr(agentflow.cli, "default_smoke_pipeline_path", lambda: "examples/local-real-agents-kimi-smoke.yaml")
+    fake_pipeline = object()
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["smoke"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"id": "smoke-warning", "status": "completed"}
+    assert captured["loaded_path"] == "examples/local-real-agents-kimi-smoke.yaml"
+    assert captured["submitted_pipeline"] is fake_pipeline
+    assert captured["wait_run_id"] == "smoke-warning"
+    assert captured["wait_timeout"] is None
+
+
 def test_smoke_accepts_explicit_pipeline_path(monkeypatch):
     captured: dict[str, object] = {}
 
