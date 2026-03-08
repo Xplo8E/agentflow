@@ -54,6 +54,10 @@ def _doctor_report():
     return build_local_smoke_doctor_report()
 
 
+def _echo_doctor_report(report: object, *, err: bool = False) -> None:
+    typer.echo(json.dumps(report.as_dict(), indent=2), err=err)
+
+
 @app.command()
 def serve(
     host: str = "127.0.0.1",
@@ -89,15 +93,17 @@ def smoke(
     if path is None:
         report = _doctor_report()
         if report.status == "failed":
-            typer.echo(json.dumps(report.as_dict(), indent=2))
+            _echo_doctor_report(report)
             raise typer.Exit(code=1)
+        if report.status == "warning":
+            _echo_doctor_report(report, err=True)
     _run_pipeline_path(path or default_smoke_pipeline_path(), runs_dir, max_concurrent_runs)
 
 
 @app.command()
 def doctor() -> None:
     report = _doctor_report()
-    typer.echo(json.dumps(report.as_dict(), indent=2))
+    _echo_doctor_report(report)
     raise typer.Exit(code=0 if report.status != "failed" else 1)
 
 
