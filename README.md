@@ -339,6 +339,8 @@ You can run the same preflight directly:
 agentflow doctor
 ```
 
+When `codex` or `claude` are already on `PATH`, the doctor summary now includes the resolved executable path and `--version` output to make local CLI mismatches easier to spot.
+
 The bundled smoke pipeline bootstraps the `kimi` shell helper inside the Claude node, so you do not need to wrap the entire `agentflow smoke` command in `bash -lic`. If you want to run a custom smoke pipeline instead, pass its path explicitly with `agentflow smoke path/to/pipeline.yaml`, or run it directly with `agentflow run path/to/pipeline.yaml` and keep the same `auto` preflight behavior for bundled and Kimi-bootstrapped local smoke pipelines. Use `--preflight always` for other custom pipelines that still need those checks, or `--preflight never` to skip preflight even for the bundled example. Add `--output json-summary` when you want a concise machine-readable result, or `--output json` when you want the full persisted run record instead of the compact summary.
 
 ## Reference sources
