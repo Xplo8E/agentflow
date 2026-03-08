@@ -90,6 +90,14 @@ agentflow doctor
 ```
 
 `agentflow doctor` prints JSON by default so CI and wrapper scripts can parse it directly. Use `agentflow doctor --output summary` when you want a quick human-readable checklist instead.
+
+You can also point Doctor at a custom pipeline to surface the same pipeline-specific local shell bootstrap warnings that `run` and `smoke` preflight use:
+
+```bash
+agentflow doctor path/to/pipeline.yaml --output summary
+```
+
+That keeps it easy to validate real Codex/Claude/Kimi DAGs before you launch them, especially when a node depends on a local `kimi` shell helper or other bash startup behavior.
 Add `--shell-bridge` when you want Doctor to include a ready-to-paste login-shell bridge snippet for `~/.bash_profile`, `~/.bash_login`, or `~/.profile`.
 
 Run the web console:
