@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 
 import agentflow.cli
 from agentflow.cli import app
-from agentflow.doctor import DoctorCheck, DoctorReport
+from agentflow.doctor import DoctorCheck, DoctorReport, ShellBridgeRecommendation
 
 runner = CliRunner()
 
@@ -1144,6 +1144,71 @@ def test_doctor_supports_summary_output(monkeypatch):
 
     assert result.exit_code == 0
     assert result.stdout == "Doctor: ok\n- kimi_shell_helper: ok - ready\n"
+
+
+def test_doctor_can_include_shell_bridge_in_json_output(monkeypatch):
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    monkeypatch.setattr(
+        agentflow.cli,
+        "build_bash_login_shell_bridge_recommendation",
+        lambda: ShellBridgeRecommendation(
+            target="~/.bash_profile",
+            source="~/.profile",
+            snippet='if [ -f "$HOME/.profile" ]; then\n  . "$HOME/.profile"\nfi\n',
+            reason="Bash login shells use `~/.bash_profile`, so `~/.profile` never runs.",
+        ),
+    )
+
+    result = runner.invoke(app, ["doctor", "--output", "json", "--shell-bridge"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {
+        "status": "ok",
+        "checks": [{"name": "kimi_shell_helper", "status": "ok", "detail": "ready"}],
+        "shell_bridge": {
+            "target": "~/.bash_profile",
+            "source": "~/.profile",
+            "snippet": 'if [ -f "$HOME/.profile" ]; then\n  . "$HOME/.profile"\nfi\n',
+            "reason": "Bash login shells use `~/.bash_profile`, so `~/.profile` never runs.",
+        },
+    }
+
+
+def test_doctor_can_include_shell_bridge_in_summary_output(monkeypatch):
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    monkeypatch.setattr(
+        agentflow.cli,
+        "build_bash_login_shell_bridge_recommendation",
+        lambda: ShellBridgeRecommendation(
+            target="~/.bash_profile",
+            source="~/.profile",
+            snippet='if [ -f "$HOME/.profile" ]; then\n  . "$HOME/.profile"\nfi\n',
+            reason="Bash login shells use `~/.bash_profile`, so `~/.profile` never runs.",
+        ),
+    )
+
+    result = runner.invoke(app, ["doctor", "--output", "summary", "--shell-bridge"])
+
+    assert result.exit_code == 0
+    assert result.stdout == (
+        "Doctor: ok\n"
+        "- kimi_shell_helper: ok - ready\n"
+        "Shell bridge suggestion for `~/.bash_profile` from `~/.profile`:\n"
+        "Reason: Bash login shells use `~/.bash_profile`, so `~/.profile` never runs.\n"
+        "if [ -f \"$HOME/.profile\" ]; then\n"
+        "  . \"$HOME/.profile\"\n"
+        "fi\n"
+    )
+
+
+def test_doctor_shell_bridge_summary_reports_when_no_fix_is_needed(monkeypatch):
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    monkeypatch.setattr(agentflow.cli, "build_bash_login_shell_bridge_recommendation", lambda: None)
+
+    result = runner.invoke(app, ["doctor", "--output", "summary", "--shell-bridge"])
+
+    assert result.exit_code == 0
+    assert result.stdout == "Doctor: ok\n- kimi_shell_helper: ok - ready\nShell bridge suggestion: not needed\n"
 
 
 def test_doctor_command_does_not_import_web_stack(monkeypatch):

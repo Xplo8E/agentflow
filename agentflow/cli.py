@@ -8,7 +8,7 @@ from pathlib import Path
 
 import typer
 from agentflow.defaults import default_smoke_pipeline_path
-from agentflow.doctor import build_local_smoke_doctor_report
+from agentflow.doctor import build_bash_login_shell_bridge_recommendation, build_local_smoke_doctor_report
 
 app = typer.Typer(add_completion=False)
 
@@ -382,14 +382,39 @@ def _load_pipeline_with_optional_smoke_preflight(
     return pipeline if pipeline is not None else _load_pipeline(selected_path)
 
 
-def _render_doctor_summary(report: object) -> str:
+def _render_shell_bridge_summary(shell_bridge: object | None) -> str:
+    if shell_bridge is None:
+        return "Shell bridge suggestion: not needed"
+
+    return "\n".join(
+        [
+            (
+                f"Shell bridge suggestion for `{getattr(shell_bridge, 'target', '~/.profile')}` "
+                f"from `{getattr(shell_bridge, 'source', '~/.bashrc')}`:"
+            ),
+            f"Reason: {getattr(shell_bridge, 'reason', '')}",
+            getattr(shell_bridge, "snippet", "").rstrip(),
+        ]
+    )
+
+
+def _render_doctor_summary(report: object, *, include_shell_bridge: bool = False, shell_bridge: object | None = None) -> str:
     lines = [f"Doctor: {_status_value(getattr(report, 'status', 'unknown'))}"]
     for check in getattr(report, "checks", []) or []:
         lines.append(
             f"- {getattr(check, 'name', 'unknown')}: {_status_value(getattr(check, 'status', 'unknown'))}"
             f" - {getattr(check, 'detail', '')}"
         )
+    if include_shell_bridge:
+        lines.append(_render_shell_bridge_summary(shell_bridge))
     return "\n".join(lines)
+
+
+def _build_doctor_payload(report: object, *, include_shell_bridge: bool = False, shell_bridge: object | None = None) -> dict[str, object]:
+    payload = report.as_dict()
+    if include_shell_bridge:
+        payload["shell_bridge"] = None if shell_bridge is None else shell_bridge.as_dict()
+    return payload
 
 
 def _echo_doctor_report(
@@ -397,11 +422,22 @@ def _echo_doctor_report(
     *,
     output: StructuredOutputFormat = StructuredOutputFormat.JSON,
     err: bool = False,
+    include_shell_bridge: bool = False,
+    shell_bridge: object | None = None,
 ) -> None:
     if output == StructuredOutputFormat.SUMMARY:
-        typer.echo(_render_doctor_summary(report), err=err)
+        typer.echo(
+            _render_doctor_summary(report, include_shell_bridge=include_shell_bridge, shell_bridge=shell_bridge),
+            err=err,
+        )
         return
-    typer.echo(json.dumps(report.as_dict(), indent=2), err=err)
+    typer.echo(
+        json.dumps(
+            _build_doctor_payload(report, include_shell_bridge=include_shell_bridge, shell_bridge=shell_bridge),
+            indent=2,
+        ),
+        err=err,
+    )
 
 
 def _echo_inspection(report: dict[str, object], *, output: InspectionOutputFormat) -> None:
@@ -488,9 +524,15 @@ def smoke(
 @app.command()
 def doctor(
     output: StructuredOutputFormat = typer.Option(StructuredOutputFormat.JSON, "--output", help="Result output format."),
+    shell_bridge: bool = typer.Option(
+        False,
+        "--shell-bridge",
+        help="Include a ready-to-paste bash login bridge suggestion when local shell startup needs one.",
+    ),
 ) -> None:
     report = _doctor_report()
-    _echo_doctor_report(report, output=output)
+    recommendation = build_bash_login_shell_bridge_recommendation() if shell_bridge else None
+    _echo_doctor_report(report, output=output, include_shell_bridge=shell_bridge, shell_bridge=recommendation)
     raise typer.Exit(code=0 if report.status != "failed" else 1)
 
 
