@@ -40,6 +40,20 @@ def _check_executable(name: str) -> DoctorCheck:
     return DoctorCheck(name=name, status="failed", detail=f"`{name}` is not on PATH.")
 
 
+def _check_claude_host_executable() -> DoctorCheck:
+    path = shutil.which("claude")
+    if path:
+        return DoctorCheck(name="claude", status="ok", detail=f"Found `claude` at `{path}`.")
+    return DoctorCheck(
+        name="claude",
+        status="warning",
+        detail=(
+            "`claude` is not on PATH outside the smoke shell bootstrap; "
+            "`bash -lic` plus `kimi` must provide it for the bundled smoke pipeline."
+        ),
+    )
+
+
 def _bash_login_file(home: Path) -> Path | None:
     for filename in _BASH_LOGIN_FILENAMES:
         candidate = home / filename
@@ -188,7 +202,7 @@ def build_local_smoke_doctor_report(home: Path | None = None) -> DoctorReport:
     resolved_home = home or Path.home()
     checks = [
         _check_executable("codex"),
-        _check_executable("claude"),
+        _check_claude_host_executable(),
         _check_bash_login_startup(resolved_home),
         _check_kimi_shell_helper(resolved_home),
     ]
