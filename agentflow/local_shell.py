@@ -129,6 +129,8 @@ def _shell_command_exports_env_var_before_target(command: str | None, env_var: s
     prefix_allows_options = False
     active_command: str | None = None
     declare_exports = False
+    assigned_in_shell = False
+    pending_assignment = False
     exported = False
 
     for index, token in enumerate(tokens):
@@ -138,6 +140,9 @@ def _shell_command_exports_env_var_before_target(command: str | None, env_var: s
 
         normalized = _normalize_shell_token(token)
         if _token_resets_command_position(token):
+            if expects_command and pending_assignment:
+                assigned_in_shell = True
+                pending_assignment = False
             expects_command = True
             prefix_allows_options = False
             active_command = None
@@ -152,6 +157,8 @@ def _shell_command_exports_env_var_before_target(command: str | None, env_var: s
                 prefix_allows_options = True
                 continue
             if _looks_like_env_assignment(token):
+                if _env_assignment_name(token) == env_var:
+                    pending_assignment = True
                 continue
             if prefix_allows_options and (token == "--" or token.startswith("-")):
                 continue
@@ -159,6 +166,7 @@ def _shell_command_exports_env_var_before_target(command: str | None, env_var: s
             prefix_allows_options = False
             active_command = os.path.basename(token)
             declare_exports = False
+            pending_assignment = False
             if normalized == target:
                 return exported
             continue
@@ -168,6 +176,8 @@ def _shell_command_exports_env_var_before_target(command: str | None, env_var: s
                 continue
             if _env_assignment_name(token) == env_var:
                 exported = True
+            if normalized == env_var and assigned_in_shell:
+                exported = True
             continue
 
         if active_command in _EXPORT_STYLE_COMMANDS:
@@ -175,8 +185,11 @@ def _shell_command_exports_env_var_before_target(command: str | None, env_var: s
                 if "x" in normalized.lstrip("-"):
                     declare_exports = True
                 continue
-            if declare_exports and _env_assignment_name(token) == env_var:
-                exported = True
+            if declare_exports:
+                if _env_assignment_name(token) == env_var:
+                    exported = True
+                if normalized == env_var and assigned_in_shell:
+                    exported = True
 
     return False
 
