@@ -61,7 +61,15 @@ nodes:
 
 
 def load_default_pipeline_yaml() -> str:
-    example_path = Path(__file__).resolve().parents[1] / "examples" / "pipeline.yaml"
+    example_path = bundled_example_path("pipeline.yaml")
     if example_path.exists():
         return example_path.read_text(encoding="utf-8")
     return DEFAULT_PIPELINE_YAML
+
+
+def bundled_example_path(name: str) -> Path:
+    return Path(__file__).resolve().parents[1] / "examples" / name
+
+
+def default_smoke_pipeline_path() -> str:
+    return str(bundled_example_path("local-real-agents-kimi-smoke.yaml"))

@@ -7,6 +7,7 @@ import typer
 import uvicorn
 
 from agentflow.app import create_app
+from agentflow.defaults import default_smoke_pipeline_path
 from agentflow.loader import load_pipeline_from_path
 from agentflow.orchestrator import Orchestrator
 from agentflow.store import RunStore
@@ -18,6 +19,19 @@ def _build_runtime(runs_dir: str, max_concurrent_runs: int) -> tuple[RunStore, O
     store = RunStore(runs_dir)
     orchestrator = Orchestrator(store=store, max_concurrent_runs=max_concurrent_runs)
     return store, orchestrator
+
+
+def _run_pipeline_path(path: str, runs_dir: str, max_concurrent_runs: int) -> None:
+    _, orchestrator = _build_runtime(runs_dir, max_concurrent_runs)
+    pipeline = load_pipeline_from_path(path)
+
+    async def _run() -> None:
+        run_record = await orchestrator.submit(pipeline)
+        completed = await orchestrator.wait(run_record.id, timeout=None)
+        typer.echo(json.dumps(completed.model_dump(mode="json"), indent=2))
+        raise typer.Exit(code=0 if completed.status.value == "completed" else 1)
+
+    asyncio.run(_run())
 
 
 @app.command()
@@ -43,16 +57,16 @@ def run(
     runs_dir: str = typer.Option(".agentflow/runs", envvar="AGENTFLOW_RUNS_DIR"),
     max_concurrent_runs: int = typer.Option(2, envvar="AGENTFLOW_MAX_CONCURRENT_RUNS"),
 ) -> None:
-    store, orchestrator = _build_runtime(runs_dir, max_concurrent_runs)
-    pipeline = load_pipeline_from_path(path)
+    _run_pipeline_path(path, runs_dir, max_concurrent_runs)
 
-    async def _run() -> None:
-        run_record = await orchestrator.submit(pipeline)
-        completed = await orchestrator.wait(run_record.id, timeout=None)
-        typer.echo(json.dumps(completed.model_dump(mode="json"), indent=2))
-        raise typer.Exit(code=0 if completed.status.value == "completed" else 1)
 
-    asyncio.run(_run())
+@app.command()
+def smoke(
+    path: str | None = typer.Argument(None, help="Optional pipeline path. Defaults to the bundled real-agent smoke example."),
+    runs_dir: str = typer.Option(".agentflow/runs", envvar="AGENTFLOW_RUNS_DIR"),
+    max_concurrent_runs: int = typer.Option(2, envvar="AGENTFLOW_MAX_CONCURRENT_RUNS"),
+) -> None:
+    _run_pipeline_path(path or default_smoke_pipeline_path(), runs_dir, max_concurrent_runs)
 
 
 if __name__ == "__main__":
