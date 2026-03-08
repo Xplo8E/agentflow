@@ -4,7 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from agentflow.local_shell import kimi_shell_init_requires_interactive_bash_warning, shell_command_uses_kimi_helper
+from agentflow.local_shell import (
+    kimi_shell_init_requires_interactive_bash_warning,
+    shell_command_uses_kimi_helper,
+    target_uses_interactive_bash,
+)
 
 
 @pytest.mark.parametrize(
@@ -156,3 +160,36 @@ def test_kimi_shell_init_requires_interactive_bash_warning_keeps_generic_warning
         "`target.shell` uses `kimi` with bash without interactive startup; helpers from `~/.bashrc` are usually "
         "unavailable. Add `-i`, set `target.shell_interactive: true`, or use `bash -lic`."
     )
+
+
+@pytest.mark.parametrize(
+    "shell",
+    [
+        "bash --rcfile ~/.bashrc -ic '{command}'",
+        "bash --init-file ~/.bashrc -ic '{command}'",
+    ],
+)
+def test_target_uses_interactive_bash_skips_long_options_with_values(shell: str):
+    target = {
+        "kind": "local",
+        "shell": shell,
+    }
+
+    assert target_uses_interactive_bash(target) is True
+
+
+@pytest.mark.parametrize(
+    "shell",
+    [
+        "bash --rcfile ~/.bashrc -ic 'source ~/.bashrc && {command}'",
+        "bash --init-file ~/.bashrc -ic 'source ~/.bashrc && {command}'",
+    ],
+)
+def test_kimi_shell_init_requires_interactive_bash_warning_accepts_interactive_bash_with_long_option_values(shell: str):
+    target = {
+        "kind": "local",
+        "shell": shell,
+        "shell_init": ["command -v kimi >/dev/null 2>&1", "kimi"],
+    }
+
+    assert kimi_shell_init_requires_interactive_bash_warning(target) is None
