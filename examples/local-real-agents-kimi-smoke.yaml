@@ -16,6 +16,12 @@ nodes:
     agent: claude
     provider: kimi
     depends_on: [codex_plan]
+    target:
+      kind: local
+      shell: bash
+      shell_login: true
+      shell_interactive: true
+      shell_init: kimi
     prompt: |
       Reply with exactly: claude ok
     timeout_seconds: 180

@@ -109,6 +109,7 @@ Each node supports:
 - `mcps`: a list of MCP server definitions
 - `skills`: a list of local skill paths or names
 - `target`: `local`, `container`, or `aws_lambda`
+- local shell bootstrap fields: `shell`, `shell_login`, `shell_interactive`, and `shell_init`
 - `capture`: `final` or `trace`
 - `retries` and `retry_backoff_seconds`
 - `success_criteria`: output or filesystem checks evaluated after execution
@@ -131,6 +132,19 @@ Built-in provider shorthands:
 ### Local
 
 Runs the prepared agent command directly on the host. Set `target.shell` to wrap the command in a specific shell, such as `bash -lc`. You can also use a `{command}` placeholder in the shell string to run shell bootstrap steps before the prepared agent command.
+
+For common shell helper workflows, you can keep the config declarative instead of hand-writing a quoted shell template:
+
+```yaml
+target:
+  kind: local
+  shell: bash
+  shell_login: true
+  shell_interactive: true
+  shell_init: kimi
+```
+
+This runs the node inside `bash`, enables login and interactive startup files, executes `kimi`, and then launches the prepared agent command. It is useful for helper functions defined in `~/.bashrc`. If your login shell uses `~/.bash_profile`, make sure it sources `~/.bashrc`; otherwise Bash falls back to `~/.profile`.
 
 ### Container
 
@@ -210,10 +224,11 @@ The Playwright tests use lightweight mock `codex` and `claude` executables under
 Run a real local smoke check with your installed CLIs:
 
 ```bash
-bash -lic 'kimi; . .venv/bin/activate; agentflow run examples/local-real-agents-kimi-smoke.yaml'
+. .venv/bin/activate
+agentflow run examples/local-real-agents-kimi-smoke.yaml
 ```
 
-This keeps the check small while exercising both local `codex` and local `claude` end-to-end. If your shell defines the `kimi` helper in `~/.bashrc`, the interactive login shell above will load it before running AgentFlow.
+This keeps the check small while exercising both local `codex` and local `claude` end-to-end. The example pipeline bootstraps the `kimi` shell helper inside the Claude node, so you do not need to wrap the entire `agentflow run` command in `bash -lic`.
 
 ## Reference sources
 
