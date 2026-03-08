@@ -2012,6 +2012,8 @@ def test_run_auto_preflight_stops_when_local_claude_is_unavailable_after_shell_b
         "Doctor: failed\n"
         "- kimi_shell_helper: ok - ready\n"
         "- claude_ready: failed - Node `claude_review` (claude) cannot launch local Claude after the node shell bootstrap; `claude --version` fails in the prepared local shell.\n"
+        "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
+        "Pipeline auto preflight matches: claude_review (claude) via `target.shell_init`\n"
     )
 
 
@@ -2349,7 +2351,11 @@ def test_smoke_runs_when_bundled_preflight_warns(monkeypatch):
 
     assert result.exit_code == 0
     assert "Run smoke-warning: completed" in result.stdout
-    assert result.stderr == "Doctor: warning\n- claude: warning - bootstrap-only\n"
+    assert result.stderr == (
+        "Doctor: warning\n"
+        "- claude: warning - bootstrap-only\n"
+        "Pipeline auto preflight: enabled - path matches the bundled real-agent smoke pipeline.\n"
+    )
     assert captured["loaded_path"] == "examples/local-real-agents-kimi-smoke.yaml"
     assert captured["submitted_pipeline"] is fake_pipeline
     assert captured["wait_run_id"] == "smoke-warning"
@@ -2532,6 +2538,7 @@ def test_smoke_warn_preflight_includes_shell_bridge_summary_when_available(monke
     assert result.stderr == (
         "Doctor: warning\n"
         "- bash_login_startup: warning - missing bridge\n"
+        "Pipeline auto preflight: enabled - path matches the bundled real-agent smoke pipeline.\n"
         "Shell bridge suggestion for `~/.bash_profile` from `~/.profile`:\n"
         "Reason: Bash login shells use `~/.bash_profile`, so `~/.profile` never runs.\n"
         "if [ -f \"$HOME/.profile\" ]; then\n"
@@ -2570,6 +2577,14 @@ def test_smoke_warn_preflight_honors_json_output(monkeypatch):
     assert json.loads(result.stderr) == {
         "status": "warning",
         "checks": [{"name": "claude", "status": "warning", "detail": "bootstrap-only"}],
+        "pipeline": {
+            "auto_preflight": {
+                "enabled": True,
+                "reason": "path matches the bundled real-agent smoke pipeline.",
+                "matches": [],
+                "match_summary": [],
+            }
+        },
     }
 
 
@@ -2604,6 +2619,14 @@ def test_smoke_warn_preflight_includes_shell_bridge_json_when_available(monkeypa
     assert json.loads(result.stderr) == {
         "status": "warning",
         "checks": [{"name": "bash_login_startup", "status": "warning", "detail": "missing bridge"}],
+        "pipeline": {
+            "auto_preflight": {
+                "enabled": True,
+                "reason": "path matches the bundled real-agent smoke pipeline.",
+                "matches": [],
+                "match_summary": [],
+            }
+        },
         "shell_bridge": _shell_bridge_recommendation().as_dict(),
     }
 
@@ -2909,7 +2932,11 @@ def test_smoke_runs_preflight_for_explicit_bundled_pipeline_path(monkeypatch):
 
     assert result.exit_code == 0
     assert doctor_calls == 1
-    assert result.stderr == "Doctor: warning\n- claude: warning - bootstrap-only\n"
+    assert result.stderr == (
+        "Doctor: warning\n"
+        "- claude: warning - bootstrap-only\n"
+        "Pipeline auto preflight: enabled - path matches the bundled real-agent smoke pipeline.\n"
+    )
     assert captured["loaded_path"] == bundled_path
     assert captured["submitted_pipeline"] is fake_pipeline
     assert captured["wait_run_id"] == "smoke-explicit-default"

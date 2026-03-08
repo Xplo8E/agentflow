@@ -713,21 +713,28 @@ def _load_pipeline_with_optional_smoke_preflight(
     if should_run_preflight:
         if pipeline is None and preflight == SmokePreflightMode.ALWAYS and not selected_path_matches_bundled:
             pipeline = _load_pipeline(selected_path)
+        preflight_pipeline = pipeline
         report = _doctor_report()
         if pipeline is not None:
             report = _augment_preflight_report(report, pipeline)
         elif selected_path_matches_bundled and _status_value(getattr(report, "status", "ok")) != "failed":
-            pipeline = _load_pipeline(selected_path)
-            report = _extend_doctor_report(report, _pipeline_launch_env_override_checks(pipeline))
+            preflight_pipeline = _load_pipeline(selected_path)
+            report = _extend_doctor_report(report, _pipeline_launch_env_override_checks(preflight_pipeline))
         doctor_output = _structured_output_from_run_output(output)
         shell_bridge = _preflight_shell_bridge_recommendation(report)
         include_shell_bridge = shell_bridge is not None
+        preflight_context = None
+        if preflight_pipeline is not None:
+            preflight_context = {
+                "auto_preflight": _auto_smoke_preflight_metadata(path or selected_path, preflight_pipeline)
+            }
         if report.status == "failed":
             _echo_doctor_report(
                 report,
                 output=doctor_output,
                 include_shell_bridge=include_shell_bridge,
                 shell_bridge=shell_bridge,
+                pipeline=preflight_context,
             )
             raise typer.Exit(code=1)
         if report.status == "warning":
@@ -737,6 +744,7 @@ def _load_pipeline_with_optional_smoke_preflight(
                 err=True,
                 include_shell_bridge=include_shell_bridge,
                 shell_bridge=shell_bridge,
+                pipeline=preflight_context,
             )
         elif show_preflight:
             _echo_doctor_report(
@@ -745,7 +753,10 @@ def _load_pipeline_with_optional_smoke_preflight(
                 err=True,
                 include_shell_bridge=include_shell_bridge,
                 shell_bridge=shell_bridge,
+                pipeline=preflight_context,
             )
+        if preflight_pipeline is not None:
+            pipeline = preflight_pipeline
 
     return pipeline if pipeline is not None else _load_pipeline(selected_path)
 
