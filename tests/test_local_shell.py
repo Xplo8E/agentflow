@@ -6,6 +6,8 @@ import pytest
 
 from agentflow.local_shell import (
     kimi_shell_init_requires_interactive_bash_warning,
+    shell_init_exports_env_var,
+    shell_template_exports_env_var_before_command,
     shell_command_uses_kimi_helper,
     target_uses_interactive_bash,
 )
@@ -159,6 +161,24 @@ def test_kimi_shell_init_requires_interactive_bash_warning_keeps_generic_warning
     assert kimi_shell_init_requires_interactive_bash_warning(target, home=home) == (
         "`target.shell` uses `kimi` with bash without interactive startup; helpers from `~/.bashrc` are usually "
         "unavailable. Add `-i`, set `target.shell_interactive: true`, or use `bash -lic`."
+    )
+
+
+def test_shell_init_exports_env_var_detects_exported_provider_key():
+    assert shell_init_exports_env_var(["export ANTHROPIC_API_KEY=test-shell-key"], "ANTHROPIC_API_KEY") is True
+
+
+def test_shell_init_exports_env_var_ignores_non_exported_assignment():
+    assert shell_init_exports_env_var(["ANTHROPIC_API_KEY=test-shell-key"], "ANTHROPIC_API_KEY") is False
+
+
+def test_shell_template_exports_env_var_before_command_detects_nested_export():
+    assert (
+        shell_template_exports_env_var_before_command(
+            "bash -lc 'export ANTHROPIC_API_KEY=test-shell-key && {command}'",
+            "ANTHROPIC_API_KEY",
+        )
+        is True
     )
 
 
