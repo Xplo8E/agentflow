@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 import agentflow.cli
 from agentflow.cli import app
 from agentflow.doctor import DoctorCheck, DoctorReport, ShellBridgeRecommendation
+from agentflow.specs import ProviderConfig
 
 runner = CliRunner()
 
@@ -386,6 +387,37 @@ nodes:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["nodes"][0]["auth"] == "Codex CLI login or `OPENAI_API_KEY` via current environment"
+
+
+def test_inspect_command_summary_treats_custom_kimi_provider_shell_bootstrap_as_auth_source(tmp_path, monkeypatch):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-custom-kimi-provider
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    provider:
+      name: kimi-proxy
+      base_url: https://api.kimi.com/coding/
+      api_key_env: ANTHROPIC_API_KEY
+    prompt: hi
+    target:
+      kind: local
+      shell: bash
+      shell_login: true
+      shell_interactive: true
+      shell_init: kimi
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path), "--output", "json-summary"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["nodes"][0]["auth"] == "`ANTHROPIC_API_KEY` via `target.shell_init` (`kimi` helper)"
 
 
 def test_inspect_command_reports_disabled_auto_preflight_for_plain_pipeline(tmp_path):
@@ -2830,6 +2862,47 @@ def test_doctor_with_pipeline_path_accepts_provider_credentials_from_split_shell
         "Doctor: ok\n"
         "- kimi_shell_helper: ok - ready\n"
         "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
+    )
+
+
+def test_doctor_with_pipeline_path_accepts_custom_kimi_provider_credentials_from_shell_init_helper(monkeypatch):
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="claude_review",
+                agent=SimpleNamespace(value="claude"),
+                provider=ProviderConfig(
+                    name="kimi-proxy",
+                    base_url="https://api.kimi.com/coding/",
+                    api_key_env="ANTHROPIC_API_KEY",
+                    env={},
+                ),
+                env={},
+                target=SimpleNamespace(
+                    kind="local",
+                    shell="bash",
+                    shell_init="kimi",
+                    shell_login=True,
+                    shell_interactive=True,
+                ),
+            )
+        ]
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["doctor", "custom-smoke.yaml", "--output", "summary"])
+
+    assert result.exit_code == 0
+    assert captured["loaded_path"] == "custom-smoke.yaml"
+    assert result.stdout == (
+        "Doctor: ok\n"
+        "- kimi_shell_helper: ok - ready\n"
+        "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
+        "Pipeline auto preflight matches: claude_review (claude) via `target.shell_init`\n"
     )
 
 
