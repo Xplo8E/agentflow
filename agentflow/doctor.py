@@ -10,6 +10,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from agentflow.local_shell import (
+    kimi_shell_init_requires_bash_warning,
+    kimi_shell_init_requires_interactive_bash_warning,
+    shell_command_uses_kimi_helper,
+    shell_init_uses_kimi_helper,
+)
 from agentflow.prepared import PreparedExecution, build_execution_paths
 from agentflow.runners.local import LocalRunner
 from agentflow.specs import AgentKind, LocalTarget, resolve_provider
@@ -253,6 +259,13 @@ def _local_codex_auth_check_detail(node_id: str) -> str:
     )
 
 
+def _local_claude_ready_check_detail(node_id: str, executable: str) -> str:
+    return (
+        f"Node `{node_id}` (claude) cannot launch local Claude after the node shell bootstrap; "
+        f"`{executable} --version` fails in the prepared local shell."
+    )
+
+
 def _node_pipeline_workdir(node: object, pipeline: object | None = None) -> Path:
     working_path = _object_value(node, "working_path")
     if working_path is None and pipeline is not None:
@@ -293,6 +306,65 @@ def _prepared_codex_auth_execution(node: object, pipeline: object | None = None)
     return prepared, paths
 
 
+def _should_probe_local_claude(node: object) -> bool:
+    agent = _status_value(_object_value(node, "agent")).lower()
+    if agent != AgentKind.CLAUDE.value:
+        return False
+
+    target = _coerce_local_target(_object_value(node, "target"))
+    if target is None:
+        return False
+
+    if kimi_shell_init_requires_bash_warning(target) is not None:
+        return False
+    if kimi_shell_init_requires_interactive_bash_warning(target) is not None:
+        return False
+
+    provider = resolve_provider(_object_value(node, "provider"), AgentKind.CLAUDE)
+    if provider is not None and provider.name == "kimi":
+        return True
+
+    if shell_init_uses_kimi_helper(_object_value(target, "shell_init")):
+        return True
+
+    shell = _object_value(target, "shell")
+    return shell_command_uses_kimi_helper(shell if isinstance(shell, str) else None)
+
+
+def _prepared_claude_readiness_execution(
+    node: object,
+    pipeline: object | None = None,
+) -> tuple[PreparedExecution, object, str] | None:
+    if not _should_probe_local_claude(node):
+        return None
+
+    target = _coerce_local_target(_object_value(node, "target"))
+    if target is None:
+        return None
+
+    provider = resolve_provider(_object_value(node, "provider"), AgentKind.CLAUDE)
+    env = _dict_env(_object_value(provider, "env"))
+    env.update(_dict_env(_object_value(node, "env")))
+    executable = str(_object_value(node, "executable") or "claude")
+
+    pipeline_workdir = _node_pipeline_workdir(node, pipeline)
+    paths = build_execution_paths(
+        base_dir=Path.cwd() / ".agentflow" / "doctor",
+        pipeline_workdir=pipeline_workdir,
+        run_id="doctor",
+        node_id=str(_object_value(node, "id", "claude")),
+        node_target=target,
+        create_runtime_dir=False,
+    )
+    prepared = PreparedExecution(
+        command=[executable, "--version"],
+        env=env,
+        cwd=str(paths.host_workdir),
+        trace_kind="final",
+    )
+    return prepared, paths, executable
+
+
 def _can_authenticate_local_codex(node: object, pipeline: object | None = None) -> bool:
     prepared_with_paths = _prepared_codex_auth_execution(node, pipeline)
     if prepared_with_paths is None:
@@ -325,6 +397,60 @@ def _can_authenticate_local_codex(node: object, pipeline: object | None = None) 
     except OSError:
         return False
     return result.returncode == 0
+
+
+def _can_launch_local_claude(node: object, pipeline: object | None = None) -> tuple[bool, str | None]:
+    prepared_with_paths = _prepared_claude_readiness_execution(node, pipeline)
+    if prepared_with_paths is None:
+        return True, None
+
+    prepared, paths, executable = prepared_with_paths
+
+    try:
+        launch_plan = LocalRunner().plan_execution(
+            SimpleNamespace(target=_coerce_local_target(_object_value(node, "target"))),
+            prepared,
+            paths,
+        )
+    except Exception:
+        return False, executable
+
+    env = os.environ.copy()
+    env.update(launch_plan.env)
+    try:
+        result = subprocess.run(
+            launch_plan.command,
+            check=False,
+            capture_output=True,
+            cwd=launch_plan.cwd,
+            env=env,
+            text=True,
+        )
+    except OSError:
+        return False, executable
+    return result.returncode == 0, executable
+
+
+def build_pipeline_local_claude_readiness_checks(pipeline: object) -> list[DoctorCheck]:
+    checks: list[DoctorCheck] = []
+    for node in _object_value(pipeline, "nodes", []) or []:
+        agent = _status_value(_object_value(node, "agent")).lower()
+        if agent != AgentKind.CLAUDE.value:
+            continue
+
+        ready, executable = _can_launch_local_claude(node, pipeline)
+        if ready:
+            continue
+
+        node_id = str(_object_value(node, "id", "claude"))
+        checks.append(
+            DoctorCheck(
+                name="claude_ready",
+                status="failed",
+                detail=_local_claude_ready_check_detail(node_id, executable or "claude"),
+            )
+        )
+    return checks
 
 
 def build_pipeline_local_codex_auth_checks(pipeline: object) -> list[DoctorCheck]:

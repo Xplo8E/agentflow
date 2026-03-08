@@ -15,6 +15,7 @@ from agentflow.defaults import default_smoke_pipeline_path
 from agentflow.doctor import (
     DoctorCheck,
     build_bash_login_shell_bridge_recommendation,
+    build_pipeline_local_claude_readiness_checks,
     build_local_smoke_doctor_report,
     build_pipeline_local_codex_auth_checks,
 )
@@ -543,6 +544,7 @@ def _augment_preflight_report(report: object, pipeline: object) -> object:
     extra_checks = [
         *_pipeline_kimi_shell_bootstrap_checks(pipeline),
         *_pipeline_provider_credential_checks(pipeline),
+        *build_pipeline_local_claude_readiness_checks(pipeline),
         *build_pipeline_local_codex_auth_checks(pipeline),
     ]
     if not extra_checks:
