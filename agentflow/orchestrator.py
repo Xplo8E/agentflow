@@ -151,6 +151,8 @@ class Orchestrator:
         result = record.nodes[node_id]
         result.status = NodeStatus.CANCELLED
         result.finished_at = utcnow_iso()
+        if reason == "run_cancelled":
+            await self.store.append_artifact_text(run_id, node_id, "stderr.log", "Cancelled by user\n")
         await self._publish(run_id, "node_cancelled", node_id=node_id, reason=reason)
 
     async def _execute_node(self, run_id: str, node_id: str) -> None:
