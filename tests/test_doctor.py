@@ -3,8 +3,14 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
-from agentflow.doctor import build_bash_login_shell_bridge_recommendation, build_local_smoke_doctor_report
+from agentflow.doctor import (
+    _should_probe_local_claude,
+    build_bash_login_shell_bridge_recommendation,
+    build_local_smoke_doctor_report,
+)
+from agentflow.specs import ProviderConfig
 
 
 _KIMI_HELPER_OK_DETAIL = (
@@ -12,6 +18,34 @@ _KIMI_HELPER_OK_DETAIL = (
     "sets `ANTHROPIC_BASE_URL=https://api.kimi.com/coding/`, keeps both `claude` and `codex` available, "
     "and confirms Codex authentication is ready via `codex login status` or `OPENAI_API_KEY` for the bundled smoke pipeline."
 )
+
+
+def test_should_probe_local_claude_for_case_mixed_kimi_provider():
+    node = SimpleNamespace(
+        agent=SimpleNamespace(value="claude"),
+        provider=ProviderConfig(
+            name="Kimi",
+            base_url="https://api.kimi.com/coding/",
+            api_key_env="ANTHROPIC_API_KEY",
+        ),
+        target=SimpleNamespace(kind="local", shell="bash", shell_login=True, shell_interactive=True, shell_init=None),
+    )
+
+    assert _should_probe_local_claude(node) is True
+
+
+def test_should_probe_local_claude_for_custom_kimi_provider_base_url():
+    node = SimpleNamespace(
+        agent=SimpleNamespace(value="claude"),
+        provider=ProviderConfig(
+            name="kimi-proxy",
+            base_url="https://api.kimi.com/coding/",
+            api_key_env="ANTHROPIC_API_KEY",
+        ),
+        target=SimpleNamespace(kind="local", shell="bash", shell_login=True, shell_interactive=True, shell_init=None),
+    )
+
+    assert _should_probe_local_claude(node) is True
 
 
 def test_local_smoke_doctor_report_ok_with_profile_bridge(tmp_path: Path, monkeypatch):
