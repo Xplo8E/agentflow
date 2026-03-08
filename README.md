@@ -46,6 +46,12 @@ Run a pipeline once:
 agentflow run examples/pipeline.yaml
 ```
 
+Run the bundled real-agent smoke check:
+
+```bash
+agentflow smoke
+```
+
 Run the web console:
 
 ```bash
@@ -225,10 +231,10 @@ Run a real local smoke check with your installed CLIs:
 
 ```bash
 . .venv/bin/activate
-agentflow run examples/local-real-agents-kimi-smoke.yaml
+agentflow smoke
 ```
 
-This keeps the check small while exercising both local `codex` and local `claude` end-to-end. The example pipeline bootstraps the `kimi` shell helper inside the Claude node, so you do not need to wrap the entire `agentflow run` command in `bash -lic`.
+This keeps the check small while exercising both local `codex` and local `claude` end-to-end. The bundled smoke pipeline bootstraps the `kimi` shell helper inside the Claude node, so you do not need to wrap the entire `agentflow smoke` command in `bash -lic`. If you want to run a custom smoke pipeline instead, pass its path explicitly with `agentflow smoke path/to/pipeline.yaml`.
 
 ## Reference sources
 
