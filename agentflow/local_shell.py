@@ -31,6 +31,23 @@ def _looks_like_kimi_token(token: str) -> bool:
     return os.path.basename(stripped) == "kimi"
 
 
+def _is_kimi_probe_argument(tokens: list[str], index: int) -> bool:
+    if index <= 0:
+        return False
+
+    previous = tokens[index - 1]
+    if previous in {"type", "which", "hash"}:
+        return True
+
+    if index > 1 and previous.startswith("-") and tokens[index - 2] in {"type", "which", "hash"}:
+        return True
+
+    if previous in {"-v", "-V"} and index > 1 and tokens[index - 2] == "command":
+        return True
+
+    return False
+
+
 def target_uses_bash(target: Any) -> bool:
     shell = _target_value(target, "shell")
     if not isinstance(shell, str) or not shell.strip():
@@ -74,7 +91,7 @@ def shell_command_uses_kimi_helper(command: str | None) -> bool:
 
     tokens = _split_shell_parts(command)
     for index, token in enumerate(tokens):
-        if _looks_like_kimi_token(token):
+        if _looks_like_kimi_token(token) and not _is_kimi_probe_argument(tokens, index):
             return True
         if index > 0 and _is_command_flag(tokens[index - 1]) and shell_command_uses_kimi_helper(token):
             return True
