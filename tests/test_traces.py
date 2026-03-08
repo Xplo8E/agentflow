@@ -9,6 +9,27 @@ def test_codex_trace_parser_extracts_assistant_message():
     assert parser.finalize() == "codex ok"
 
 
+def test_codex_trace_parser_ignores_unstable_feature_warning():
+    parser = create_trace_parser(AgentKind.CODEX, "plan")
+
+    assert parser.feed('{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Under-development features enabled: responses_websockets_v2. To suppress this warning, set suppress_unstable_features_warning = true in /home/shou/.codex/config.toml."}}') == []
+
+    events = parser.feed('{"type":"response.output_item.done","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"codex ok"}]}}')
+
+    assert events[0].kind == "assistant_message"
+    assert parser.finalize() == "codex ok"
+
+
+def test_codex_trace_parser_keeps_real_error_items():
+    parser = create_trace_parser(AgentKind.CODEX, "plan")
+
+    events = parser.feed('{"type":"item.completed","item":{"id":"item_0","type":"error","message":"permission denied"}}')
+
+    assert events[0].kind == "item_completed"
+    assert events[0].title == "Item completed: error"
+    assert events[0].content == "permission denied"
+
+
 def test_claude_trace_parser_extracts_result():
     parser = create_trace_parser(AgentKind.CLAUDE, "implement")
     parser.feed('{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}')

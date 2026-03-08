@@ -78,6 +78,13 @@ class BaseTraceParser:
 
 @dataclass(slots=True)
 class CodexTraceParser(BaseTraceParser):
+    def _is_ignorable_item_warning(self, item: dict[str, Any]) -> bool:
+        item_type = item.get("type") or item.get("details", {}).get("type")
+        if item_type != "error":
+            return False
+        message = str(item.get("message") or "")
+        return message.startswith("Under-development features enabled:")
+
     def feed(self, line: str) -> list[NormalizedTraceEvent]:
         payload = _json(line)
         if payload is None:
@@ -105,6 +112,8 @@ class CodexTraceParser(BaseTraceParser):
                 events.append(self.emit("event", str(event_type), _stringify(payload), payload))
         elif event_type in {"item.completed", "item/completed"}:
             item = payload.get("item") or payload.get("params", {}).get("item") or {}
+            if self._is_ignorable_item_warning(item):
+                return []
             text = _stringify(item)
             item_type = item.get("type") or item.get("details", {}).get("type") or "item"
             if item_type in {"agentMessage", "agent_message"} and text:
