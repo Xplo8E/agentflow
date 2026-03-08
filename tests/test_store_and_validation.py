@@ -277,3 +277,14 @@ async def test_store_loads_runs_and_artifacts_from_disk(tmp_path):
     assert reloaded.get_run("run-1").pipeline.name == "persisted"
     assert reloaded.get_events("run-1")[0].type == "run_started"
     assert reloaded.read_artifact_text("run-1", "alpha", "output.txt") == "hello persisted"
+
+
+def test_store_expands_user_in_base_dir(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+    store = RunStore("~/agentflow-runs")
+
+    assert store.base_dir == home / "agentflow-runs"
+    assert store.base_dir.exists()

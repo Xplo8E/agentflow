@@ -13,7 +13,7 @@ from agentflow.utils import ensure_dir
 
 class RunStore:
     def __init__(self, base_dir: str | Path = ".agentflow/runs") -> None:
-        self.base_dir = ensure_dir(Path(base_dir))
+        self.base_dir = ensure_dir(Path(base_dir).expanduser())
         self._runs: dict[str, RunRecord] = {}
         self._locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
         self._subscribers: defaultdict[str, set[queue.Queue[RunEvent]]] = defaultdict(set)
