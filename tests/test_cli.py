@@ -364,6 +364,7 @@ def test_python_module_entrypoint_displays_help():
     assert "cancel" in completed.stdout
     assert "rerun" in completed.stdout
     assert "check-local" in completed.stdout
+    assert "toolchain-local" in completed.stdout
     assert "smoke" in completed.stdout
 
 

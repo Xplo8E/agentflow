@@ -9,7 +9,7 @@ help:
 	  'Available targets:' \
 	  '  python        Prefer .venv/bin/python when available, else python3' \
 	  '  test          Run the Python test suite' \
-	  '  toolchain-local Verify `bash -lic` + `kimi` still exposes local codex and claude, report bash startup, and show Codex auth sources (override timeout with AGENTFLOW_LOCAL_VERIFY_TIMEOUT_SECONDS)' \
+	  '  toolchain-local Run `agentflow toolchain-local --output summary` for the local bash/Kimi/Codex/Claude readiness check' \
 	  '  verify-local  Run the full local Codex + Claude-on-Kimi verification stack across external doctor, inspect, check-local, and run paths (same timeout override)' \
 	  '  doctor-local-custom Verify a temporary external Codex + Claude-on-Kimi pipeline through `agentflow doctor`' \
 	  '  doctor-local-custom-shell-init Verify a temporary external Codex + Claude-on-Kimi `shell_init: kimi` pipeline through `agentflow doctor`' \
@@ -32,7 +32,7 @@ test:
 	$(PYTHON) -m pytest -q
 
 toolchain-local:
-	bash scripts/verify-local-kimi-shell.sh
+	$(PYTHON) -m agentflow toolchain-local --output summary
 
 verify-local:
 	bash scripts/verify-local-kimi-stack.sh
