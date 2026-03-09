@@ -45,6 +45,7 @@ from agentflow.local_shell import (
     shell_init_uses_kimi_helper,
     shell_template_exported_env_var_value_before_command,
     target_bash_home,
+    target_bash_login_startup_warning,
     target_uses_interactive_bash,
     target_uses_login_bash,
 )
@@ -1192,6 +1193,35 @@ def _pipeline_provider_credential_checks(pipeline: object) -> list[DoctorCheck]:
     return checks
 
 
+def _pipeline_bash_login_startup_checks(pipeline: object) -> list[DoctorCheck]:
+    checks: list[DoctorCheck] = []
+    for node in getattr(pipeline, "nodes", None) or []:
+        target = _coerce_local_target(getattr(node, "target", None))
+        if target is None or not target_uses_login_bash(target):
+            continue
+
+        agent = _status_value(getattr(node, "agent", None)).lower()
+        provider = None
+        if agent in {member.value for member in AgentKind}:
+            provider = resolve_provider(getattr(node, "provider", None), AgentKind(agent))
+        launch_env = merge_env_layers(getattr(provider, "env", None), getattr(node, "env", None))
+        launch_cwd = _local_target_launch_cwd(node, pipeline)
+        warning = target_bash_login_startup_warning(target, env=launch_env, cwd=launch_cwd)
+        if warning is None:
+            continue
+
+        node_id = str(getattr(node, "id", "node"))
+        effective_home = target_bash_home(target, env=launch_env, cwd=launch_cwd).resolve()
+        checks.append(
+            DoctorCheck(
+                name="bash_login_startup",
+                status="warning",
+                detail=f"Node `{node_id}` uses bash login startup from `{effective_home}`: {warning}",
+            )
+        )
+    return checks
+
+
 def _merge_doctor_status(current_status: str, extra_checks: list[DoctorCheck]) -> str:
     statuses = {current_status, *(_status_value(check.status) for check in extra_checks)}
     if "failed" in statuses:
@@ -1199,6 +1229,37 @@ def _merge_doctor_status(current_status: str, extra_checks: list[DoctorCheck]) -
     if "warning" in statuses:
         return "warning"
     return current_status
+
+
+def _pipeline_bash_login_startup_checks(nodes: list[dict[str, object]]) -> list[DoctorCheck]:
+    checks: list[DoctorCheck] = []
+    for node in nodes:
+        warnings = node.get("warnings")
+        if not isinstance(warnings, list):
+            continue
+
+        node_id = str(node.get("id") or "node")
+        bootstrap_home = node.get("bootstrap_home")
+        for warning in warnings:
+            if not isinstance(warning, str) or not warning.startswith("Bash login startup"):
+                continue
+
+            if isinstance(bootstrap_home, str) and bootstrap_home:
+                detail = f"Node `{node_id}` uses bash login startup from `{bootstrap_home}`: {warning}"
+            else:
+                detail = f"Node `{node_id}`: {warning}"
+            context: dict[str, object] = {"node_id": node_id}
+            if isinstance(bootstrap_home, str) and bootstrap_home:
+                context["bootstrap_home"] = bootstrap_home
+            checks.append(
+                DoctorCheck(
+                    name="bash_login_startup",
+                    status="warning",
+                    detail=detail,
+                    context=context,
+                )
+            )
+    return checks
 
 
 def _augment_preflight_report(
@@ -1210,6 +1271,7 @@ def _augment_preflight_report(
     report = _extend_doctor_report(
         report,
         [
+        *_pipeline_bash_login_startup_checks(pipeline),
         *_pipeline_kimi_shell_bootstrap_checks(pipeline),
         *_pipeline_provider_credential_checks(pipeline),
         *build_pipeline_local_kimi_readiness_checks(pipeline),
@@ -1235,6 +1297,7 @@ def _augment_preflight_report(
     return _extend_doctor_report(
         report,
         [
+            *_pipeline_bash_login_startup_checks(inspection_nodes),
             *_pipeline_launch_env_override_checks(inspection_nodes),
             *_pipeline_bootstrap_env_override_checks(inspection_nodes),
             *_pipeline_launch_env_inheritance_checks(inspection_nodes),
