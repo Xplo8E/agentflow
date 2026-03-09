@@ -76,6 +76,41 @@ def test_build_local_kimi_toolchain_report_reports_startup_and_versions(
     )
 
 
+def test_build_local_kimi_toolchain_report_includes_ambient_base_url_overrides(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    _write_login_shell_home(home)
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout=(
+                "KIMI_KIND=function\n"
+                "ANTHROPIC_BASE_URL=https://api.kimi.com/coding/\n"
+                "CODEX_AUTH=OPENAI_API_KEY + login\n"
+                "CLAUDE_PATH=/tmp/bin/claude\n"
+                "CLAUDE_VERSION=Claude Code 0.0.0\n"
+                "CODEX_PATH=/tmp/bin/codex\n"
+                "CODEX_VERSION=codex-cli 0.0.0\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://relay.example/openai")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://open.bigmodel.cn/api/anthropic")
+    monkeypatch.setattr("agentflow.doctor._run_doctor_subprocess", fake_run)
+
+    report = build_local_kimi_toolchain_report(home=home)
+
+    assert report.ambient_base_urls == {
+        "OPENAI_BASE_URL": "https://relay.example/openai",
+        "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
+    }
+
+
 def test_build_local_kimi_toolchain_report_keeps_base_url_on_failure(
     monkeypatch,
     tmp_path: Path,
@@ -235,6 +270,10 @@ def test_toolchain_local_command_emits_json(monkeypatch) -> None:
         shell_bridge=None,
         kimi_kind="function",
         anthropic_base_url="https://api.kimi.com/coding/",
+        ambient_base_urls={
+            "OPENAI_BASE_URL": "https://relay.example/openai",
+            "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
+        },
         codex_auth="OPENAI_API_KEY + login",
         codex_path="/tmp/bin/codex",
         codex_version="codex-cli 0.0.0",
@@ -257,6 +296,10 @@ def test_toolchain_local_command_emits_json(monkeypatch) -> None:
         "shell_bridge": None,
         "kimi_kind": "function",
         "anthropic_base_url": "https://api.kimi.com/coding/",
+        "ambient_base_urls": {
+            "OPENAI_BASE_URL": "https://relay.example/openai",
+            "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
+        },
         "codex_auth": "OPENAI_API_KEY + login",
         "codex_path": "/tmp/bin/codex",
         "codex_version": "codex-cli 0.0.0",
@@ -278,6 +321,10 @@ def test_toolchain_local_command_emits_json_summary(monkeypatch) -> None:
         kimi_kind="file",
         kimi_path="/tmp/bin/kimi",
         anthropic_base_url="https://api.kimi.com/coding/",
+        ambient_base_urls={
+            "OPENAI_BASE_URL": "https://relay.example/openai",
+            "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
+        },
         codex_auth="OPENAI_API_KEY + login",
         codex_path="/tmp/bin/codex",
         codex_version="codex-cli 0.0.0",
@@ -300,6 +347,12 @@ def test_toolchain_local_command_emits_json_summary(monkeypatch) -> None:
             },
             "shell_bridge": None,
         },
+        "routing": {
+            "ambient_base_urls": {
+                "OPENAI_BASE_URL": "https://relay.example/openai",
+                "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
+            }
+        },
         "kimi": {
             "kind": "file",
             "path": "/tmp/bin/kimi",
@@ -315,3 +368,38 @@ def test_toolchain_local_command_emits_json_summary(monkeypatch) -> None:
             "version": "Claude Code 0.0.0",
         },
     }
+
+
+def test_toolchain_local_command_renders_summary_with_ambient_base_urls(monkeypatch) -> None:
+    report = LocalToolchainReport(
+        status="ok",
+        startup_files={
+            "~/.bash_profile": "missing",
+            "~/.bash_login": "missing",
+            "~/.profile": "present",
+        },
+        bash_login_startup="~/.profile -> ~/.bashrc",
+        shell_bridge=None,
+        kimi_kind="function",
+        anthropic_base_url="https://api.kimi.com/coding/",
+        ambient_base_urls={
+            "OPENAI_BASE_URL": "https://relay.example/openai",
+            "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
+        },
+        codex_auth="OPENAI_API_KEY + login",
+        codex_path="/tmp/bin/codex",
+        codex_version="codex-cli 0.0.0",
+        claude_path="/tmp/bin/claude",
+        claude_version="Claude Code 0.0.0",
+    )
+    monkeypatch.setattr("agentflow.cli.build_local_kimi_toolchain_report", lambda: report)
+
+    result = runner.invoke(app, ["toolchain-local", "--output", "summary"])
+
+    assert result.exit_code == 0
+    assert "ambient OPENAI_BASE_URL=https://relay.example/openai" in result.stdout
+    assert "ambient ANTHROPIC_BASE_URL=https://open.bigmodel.cn/api/anthropic" in result.stdout
+    assert (
+        "routing note: bundled smoke clears or pins these values, but custom local Codex/Claude pipelines "
+        "inherit them unless `provider.base_url`, `provider.env`, or `node.env` overrides routing."
+    ) in result.stdout
