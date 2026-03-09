@@ -52,13 +52,13 @@ agentflow inspect examples/pipeline.yaml --node review --output json
 ```
 
 The default summary view now includes resolved per-node model, tools, capture, skills, MCP server names, provider details, and auth source hints when they are set, which makes it easier to verify mixed Codex, Claude, and Kimi launch configs before you execute a run.
-Those auth hints call out whether a node will rely on `node.env`, `provider.env`, the current environment, local shell bootstrap such as `target.shell_init: kimi`, or Codex CLI login fallback, so it is easier to spot hidden local prerequisites before launch.
+Those auth hints call out whether a node will rely on `node.env`, `provider.env`, the current environment, local shell bootstrap such as `target.bootstrap: kimi` or `target.shell_init: kimi`, or Codex CLI login fallback, so it is easier to spot hidden local prerequisites before launch.
 When a local Claude node relies on Kimi's Anthropic-compatible bootstrap, the auth hint now keeps the Kimi helper first even if `ANTHROPIC_API_KEY` is already present in `node.env`, `provider.env`, or the current environment, because that helper runs last in the prepared shell and becomes the effective launch source.
 For local Codex nodes that run through a `kimi` shell bootstrap, the same auth summary now also calls out that bootstrap even when `OPENAI_API_KEY` already comes from the environment, and it names that bootstrap as the Codex CLI login path when no key is injected.
 When a resolved provider also needs to override conflicting shell values such as `ANTHROPIC_BASE_URL`, `inspect` now warns that the node launch env will replace the current value and names whether that override came from `node.env`, `provider.env`, or provider-derived settings such as `provider.base_url`, which makes mixed provider shells easier to debug before launch.
-For local nodes, it also surfaces shell bootstrap details such as `shell`, login and interactive flags, the active bash login startup file (`~/.bash_profile`, `~/.bash_login`, or `~/.profile`), and `shell_init`, so Kimi-backed wrappers are easier to confirm without decoding the full launch command. Inline secret assignments in `shell_init` or shell wrappers are redacted in both `inspect` output and persisted `launch.json` artifacts. Those auth hints also recognize sourced shell files such as `target.shell_init: source ~/.anthropic.env` or `target.shell: bash -lc 'source ~/.anthropic.env && {command}'` when that file exports the provider key.
+For local nodes, it also surfaces shell bootstrap details such as `bootstrap`, `shell`, login and interactive flags, the active bash login startup file (`~/.bash_profile`, `~/.bash_login`, or `~/.profile`), and `shell_init`, so Kimi-backed wrappers are easier to confirm without decoding the full launch command. Inline secret assignments in `shell_init` or shell wrappers are redacted in both `inspect` output and persisted `launch.json` artifacts. Those auth hints also recognize sourced shell files such as `target.shell_init: source ~/.anthropic.env` or `target.shell: bash -lc 'source ~/.anthropic.env && {command}'` when that file exports the provider key.
 It also shows whether `agentflow run` or `agentflow smoke` will trigger the local doctor preflight automatically in the default `auto` mode, which helps you confirm bundled-smoke and Kimi-bootstrap detection before you launch anything.
-When that auto preflight is enabled because of a local Kimi bootstrap, the inspect output now also names the matching nodes and whether the trigger came from `target.shell_init` or `target.shell`, so it is easier to trust why the guard rail will run.
+When that auto preflight is enabled because of a local Kimi bootstrap, the inspect output now also names the matching nodes and whether the trigger came from `target.bootstrap`, `target.shell_init`, or `target.shell`, so it is easier to trust why the guard rail will run.
 Use `--output json-summary` when you want the same compact information in a machine-readable format without the full prepared env and payload details from `--output json`.
 For Kimi nodes, that inspect output also surfaces the effective default Moonshot provider even when you omit `provider:` from the pipeline, so the expected `KIMI_API_KEY` and base URL are visible before launch.
 When a node launch will override current shell values such as `ANTHROPIC_BASE_URL` or `OPENAI_API_KEY`, that JSON summary also includes a structured `launch_env_overrides` list per node, including the override source, so wrappers can react without scraping warning text. Base-URL values are included verbatim; secret-like keys stay redacted.
@@ -92,7 +92,7 @@ Run the same bundled local flow as a single readiness + execution check:
 agentflow check-local
 ```
 
-The bundled smoke now launches both `codex` and `claude` in parallel inside `bash -lic` so the default check covers scheduler fan-out as well as login-shell startup files for local CLI installs. The example also uses pipeline-level `local_target_defaults` to run `kimi` first for every local node, which keeps the default smoke aligned with shared Kimi bootstrap setups where the same shell helper prepares both CLIs without repeating the same target block on every node.
+The bundled smoke now launches both `codex` and `claude` in parallel inside `bash -lic` so the default check covers scheduler fan-out as well as login-shell startup files for local CLI installs. The example also uses pipeline-level `local_target_defaults.bootstrap: kimi`, which keeps the default smoke aligned with shared Kimi bootstrap setups without repeating the same target block on every node.
 The bundled Codex smoke node also clears any ambient `OPENAI_BASE_URL`, so a host-level relay or proxy does not silently hijack the default local smoke run.
 
 `agentflow check-local` prints the Doctor report to stderr first and then launches the bundled smoke pipeline only when the local setup is ready enough to continue. The repo-local `make check-local` shortcut now calls that same single-pass CLI flow, so you do not pay for the Doctor preflight twice before the smoke run starts. `check-local` also accepts an optional custom pipeline path when you want the same doctor-then-run flow for another local Kimi-backed smoke DAG, and it now reuses that same validated pipeline snapshot for the launch step instead of reloading the file after Doctor succeeds. When that custom path does not match the bundled smoke example and does not bootstrap local nodes through `kimi`, the Doctor step now skips the bundled smoke-only Kimi helper checks and sticks to the local agent checks that pipeline actually needs. When you pass `--output json` or `--output json-summary`, that preflight stderr payload is JSON so wrappers can parse readiness and run output separately.
@@ -204,7 +204,7 @@ Each node supports:
 - `mcps`: a list of MCP server definitions
 - `skills`: a list of local skill paths or names
 - `target`: `local`, `container`, or `aws_lambda`
-- local working-dir and shell bootstrap fields: `cwd`, `shell`, `shell_login`, `shell_interactive`, and `shell_init`
+- local working-dir and shell bootstrap fields: `cwd`, `bootstrap`, `shell`, `shell_login`, `shell_interactive`, and `shell_init`
 - `capture`: `final` or `trace`
 - `retries` and `retry_backoff_seconds`
 - `success_criteria`: output or filesystem checks evaluated after execution
@@ -240,33 +240,23 @@ For Bash specifically, use `-c` and either `-i` or `shell_interactive: true`; Ba
 
 `target.cwd` controls the local node working directory. Absolute paths are used as-is; relative paths are resolved from the pipeline `working_dir`. File-based success criteria such as `file_exists`, `file_contains`, and `file_nonempty` are evaluated from that resolved local node working directory.
 
-The local-shell bootstrap fields `shell_login`, `shell_interactive`, and `shell_init` require `target.shell`. AgentFlow now rejects configs that set those fields without an explicit shell, because they would otherwise be silently ignored.
+The local-shell bootstrap fields `shell_login`, `shell_interactive`, and `shell_init` require `target.shell`. For the common Kimi helper case, `target.bootstrap: kimi` expands to the same `bash` + login + interactive + `shell_init` setup automatically.
 
 For common shell helper workflows, you can keep the config declarative instead of hand-writing a quoted shell template:
 
 ```yaml
 target:
   kind: local
-  shell: bash
-  shell_login: true
-  shell_interactive: true
-  shell_init:
-    - command -v kimi >/dev/null 2>&1
-    - kimi
+  bootstrap: kimi
 ```
 
-This runs the node inside `bash`, explicitly enables login and interactive startup files, verifies `kimi` is available, executes it, and then launches the prepared agent command. `shell_init` accepts either a single command or a list of commands; list entries are joined with `&&` so bootstrap failures still stop the wrapped agent launch. It is useful for helper functions defined in `~/.bashrc` without forcing you to hand-write quoted shell templates.
+This expands to `shell: bash`, `shell_login: true`, `shell_interactive: true`, and `shell_init: ["command -v kimi >/dev/null 2>&1", "kimi"]`, then launches the prepared agent command. `shell_init` still accepts either a single command or a list of commands when you need the lower-level form; list entries are joined with `&&` so bootstrap failures still stop the wrapped agent launch.
 
 When most local nodes share the same shell bootstrap, move that block to top-level `local_target_defaults` and only override the nodes that differ:
 
 ```yaml
 local_target_defaults:
-  shell: bash
-  shell_login: true
-  shell_interactive: true
-  shell_init:
-    - command -v kimi >/dev/null 2>&1
-    - kimi
+  bootstrap: kimi
 
 nodes:
   - id: codex_plan

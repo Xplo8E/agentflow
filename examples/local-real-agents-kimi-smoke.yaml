@@ -3,12 +3,7 @@ description: Minimal parallel real-agent smoke test for local Codex plus Claude-
 working_dir: .
 concurrency: 2
 local_target_defaults:
-  shell: bash
-  shell_login: true
-  shell_interactive: true
-  shell_init:
-    - command -v kimi >/dev/null 2>&1
-    - kimi
+  bootstrap: kimi
 nodes:
   - id: codex_plan
     agent: codex
