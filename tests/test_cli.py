@@ -264,6 +264,36 @@ nodes:
     assert "Prompt: Review this: <inspect placeholder for nodes.plan.output>" in result.stdout
 
 
+def test_inspect_command_summary_infers_login_and_interactive_from_shell_wrapper(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
+    monkeypatch.setattr("agentflow.local_shell.Path.home", lambda: home)
+
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-wrapper-flags
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    prompt: hi
+    target:
+      kind: local
+      shell: "bash -lic 'kimi && {command}'"
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path), "--output", "summary"])
+
+    assert result.exit_code == 0
+    assert (
+        "Bootstrap: shell=bash -lic 'kimi && {command}', login=true, startup=~/.profile, interactive=true"
+        in result.stdout
+    )
+
+
 def test_inspect_command_node_filter_omits_unrelated_placeholder_note(tmp_path):
     pipeline_path = tmp_path / "pipeline.yaml"
     pipeline_path.write_text(
@@ -470,6 +500,37 @@ nodes:
             "cwd": str(tmp_path.resolve()),
             "env_keys": ["AGENTFLOW_TARGET_COMMAND", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"],
         }
+    ]
+
+
+def test_inspect_command_json_summary_warns_when_login_bash_has_no_user_startup_file(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr("agentflow.local_shell.Path.home", lambda: home)
+
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-missing-login-startup
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    prompt: hi
+    target:
+      kind: local
+      shell: bash
+      shell_login: true
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path), "--output", "json-summary"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["nodes"][0]["bootstrap"] == "shell=bash, login=true, startup=none"
+    assert payload["nodes"][0]["warnings"] == [
+        "Bash login startup will not load any user file from `HOME` because `~/.bash_profile`, `~/.bash_login`, and `~/.profile` are all missing."
     ]
 
 

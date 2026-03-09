@@ -16,6 +16,8 @@ from agentflow.local_shell import (
     shell_template_exports_env_var_before_command,
     target_bash_home,
     target_bash_login_startup_file,
+    target_uses_interactive_bash,
+    target_uses_login_bash,
 )
 from agentflow.agents.registry import AdapterRegistry, default_adapter_registry
 from agentflow.context import render_node_prompt
@@ -319,14 +321,17 @@ def _bootstrap_summary(target: dict[str, Any]) -> str | None:
     if shell:
         parts.append(f"shell={redact_sensitive_shell_text(shell)}")
 
-    if target.get("shell_login"):
+    uses_login_bash = target_uses_login_bash(target)
+    if uses_login_bash:
         parts.append("login=true")
 
     login_startup = target_bash_login_startup_file(target)
     if login_startup:
         parts.append(f"startup={login_startup}")
+    elif uses_login_bash:
+        parts.append("startup=none")
 
-    if target.get("shell_interactive"):
+    if target_uses_interactive_bash(target):
         parts.append("interactive=true")
 
     shell_init = render_shell_init(target.get("shell_init"))
@@ -340,6 +345,12 @@ def _bootstrap_summary(target: dict[str, Any]) -> str | None:
 
 def _target_warnings(target: dict[str, Any]) -> list[str]:
     warnings: list[str] = []
+
+    if target_uses_login_bash(target) and target_bash_login_startup_file(target) is None:
+        warnings.append(
+            "Bash login startup will not load any user file from `HOME` because `~/.bash_profile`, "
+            "`~/.bash_login`, and `~/.profile` are all missing."
+        )
 
     kimi_bash_warning = kimi_shell_init_requires_bash_warning(target)
     if kimi_bash_warning:
