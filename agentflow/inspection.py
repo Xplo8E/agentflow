@@ -16,7 +16,7 @@ from agentflow.local_shell import (
     summarize_target_bash_login_startup,
     shell_template_exports_env_var_before_command,
     target_bash_home,
-    target_bash_login_startup_file,
+    target_bash_login_startup_warning,
     target_bash_startup_exports_env_var,
     target_uses_interactive_bash,
     target_uses_login_bash,
@@ -403,11 +403,9 @@ def _target_warnings(
 
     effective_home = target_bash_home(target, env=launch_env, cwd=cwd)
 
-    if target_uses_login_bash(target) and target_bash_login_startup_file(target, env=launch_env, cwd=cwd) is None:
-        warnings.append(
-            "Bash login startup will not load any user file from `HOME` because `~/.bash_profile`, "
-            "`~/.bash_login`, and `~/.profile` are all missing."
-        )
+    login_startup_warning = target_bash_login_startup_warning(target, env=launch_env, cwd=cwd)
+    if login_startup_warning is not None:
+        warnings.append(login_startup_warning)
 
     kimi_bash_warning = kimi_shell_init_requires_bash_warning(target)
     if kimi_bash_warning:

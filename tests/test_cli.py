@@ -534,6 +534,70 @@ nodes:
     ]
 
 
+def test_inspect_command_json_summary_warns_when_login_bash_does_not_reach_bashrc(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".bash_profile").write_text('export PATH="$HOME/bin:$PATH"\n', encoding="utf-8")
+    monkeypatch.setattr("agentflow.local_shell.Path.home", lambda: home)
+
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-missing-bashrc-bridge
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    prompt: hi
+    target:
+      kind: local
+      shell: bash
+      shell_login: true
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path), "--output", "json-summary"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["nodes"][0]["bootstrap"] == "shell=bash, login=true, startup=~/.bash_profile"
+    assert payload["nodes"][0]["warnings"] == [
+        "Bash login startup uses `~/.bash_profile`, but it does not reach `~/.bashrc`."
+    ]
+
+
+def test_inspect_command_json_summary_warns_when_login_bash_reaches_missing_bashrc(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
+    monkeypatch.setattr("agentflow.local_shell.Path.home", lambda: home)
+
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-missing-bashrc-file
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    prompt: hi
+    target:
+      kind: local
+      shell: bash
+      shell_login: true
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path), "--output", "json-summary"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["nodes"][0]["bootstrap"] == "shell=bash, login=true, startup=~/.profile -> ~/.bashrc"
+    assert payload["nodes"][0]["warnings"] == [
+        "Bash login startup reaches `~/.bashrc`, but that file does not exist."
+    ]
+
+
 def test_inspect_command_supports_kimi_bootstrap_shorthand(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
