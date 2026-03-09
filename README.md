@@ -34,6 +34,7 @@ pip install -e .[dev]
 ```
 
 After installation, you can invoke the CLI either as `agentflow ...` or `python -m agentflow ...`.
+If you are not inside an activated virtualenv, prefer `.venv/bin/python -m agentflow ...` from the repo root or `python3 -m agentflow ...`.
 
 ## Quick start
 
@@ -451,9 +452,10 @@ The FastAPI app exposes:
 Run the Python suite:
 
 ```bash
-. .venv/bin/activate
-pytest -q
+make test
 ```
+
+That shortcut uses the same interpreter resolution as the other repo-local helpers: `.venv/bin/python` when the repo virtualenv exists, otherwise `python3`. Run `make python` when you want to confirm which interpreter those shortcuts will use on your machine.
 
 Run the browser suite:
 
