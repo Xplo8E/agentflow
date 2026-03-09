@@ -4699,6 +4699,49 @@ def test_check_local_defaults_to_json_when_not_tty(monkeypatch):
     assert json.loads(result.stdout) == {"id": "check-local-auto-json", "status": "completed"}
 
 
+def test_check_local_auto_uses_json_when_stdout_is_redirected_but_stderr_is_tty(monkeypatch):
+    class FakeOrchestrator:
+        async def submit(self, pipeline: object):
+            return SimpleNamespace(id="check-local-auto-mixed-streams")
+
+        async def wait(self, run_id: str, timeout: float | None = None):
+            return _completed_run(run_id, pipeline_name="local-real-agents-kimi-smoke")
+
+    monkeypatch.setattr(agentflow.cli, "_stream_supports_tty_summary", lambda *, err: err)
+    monkeypatch.setattr(
+        agentflow.cli,
+        "build_local_smoke_doctor_report",
+        lambda: DoctorReport(
+            status="warning",
+            checks=[DoctorCheck(name="bash_login_startup", status="warning", detail="missing bridge")],
+        ),
+    )
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_runtime",
+        lambda runs_dir, max_concurrent_runs: (SimpleNamespace(run_dir=lambda run_id: Path(runs_dir) / run_id), FakeOrchestrator()),
+    )
+    monkeypatch.setattr(agentflow.cli, "default_smoke_pipeline_path", lambda: "examples/local-real-agents-kimi-smoke.yaml")
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", lambda path: object())
+
+    result = runner.invoke(app, ["check-local"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stderr) == {
+        "status": "warning",
+        "checks": [{"name": "bash_login_startup", "status": "warning", "detail": "missing bridge"}],
+        "pipeline": {
+            "auto_preflight": {
+                "enabled": True,
+                "reason": "path matches the bundled real-agent smoke pipeline.",
+                "matches": [],
+                "match_summary": [],
+            }
+        },
+    }
+    assert json.loads(result.stdout) == {"id": "check-local-auto-mixed-streams", "status": "completed"}
+
+
 def test_check_local_defaults_to_summary_on_tty(monkeypatch):
     _mock_local_readiness_info(monkeypatch)
 
@@ -5325,6 +5368,75 @@ def test_smoke_warn_preflight_honors_json_output(monkeypatch):
             }
         },
     }
+
+
+def test_run_auto_warn_preflight_uses_json_when_stdout_is_redirected_but_stderr_is_tty(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeOrchestrator:
+        async def submit(self, pipeline: object):
+            captured["submitted_pipeline"] = pipeline
+            return SimpleNamespace(id="run-warning-mixed-streams")
+
+        async def wait(self, run_id: str, timeout: float | None = None):
+            captured["wait_run_id"] = run_id
+            return _completed_run(run_id, pipeline_name="custom-kimi-run")
+
+    monkeypatch.setattr(agentflow.cli, "_stream_supports_tty_summary", lambda *, err: err)
+    _reject_bundled_smoke_doctor(monkeypatch)
+    _disable_local_readiness_probes(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "_pipeline_launch_inspection_nodes", lambda pipeline: [])
+    monkeypatch.setattr(
+        agentflow.cli,
+        "build_local_kimi_bootstrap_doctor_report",
+        lambda: DoctorReport(
+            status="warning",
+            checks=[DoctorCheck(name="bash_login_startup", status="warning", detail="missing bridge")],
+        ),
+    )
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_runtime",
+        lambda runs_dir, max_concurrent_runs: (SimpleNamespace(run_dir=lambda run_id: Path(runs_dir) / run_id), FakeOrchestrator()),
+    )
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="codex_plan",
+                agent=SimpleNamespace(value="codex"),
+                provider=None,
+                env=None,
+                target=SimpleNamespace(kind="local", shell="bash", shell_interactive=True, shell_init="kimi"),
+            )
+        ]
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["run", "custom-run.yaml"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stderr) == {
+        "status": "warning",
+        "checks": [{"name": "bash_login_startup", "status": "warning", "detail": "missing bridge"}],
+        "pipeline": {
+            "auto_preflight": {
+                "enabled": True,
+                "reason": "local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.",
+                "matches": [
+                    {
+                        "node_id": "codex_plan",
+                        "agent": "codex",
+                        "trigger": "target.shell_init",
+                    }
+                ],
+                "match_summary": ["codex_plan (codex) via `target.shell_init`"],
+            }
+        },
+    }
+    assert json.loads(result.stdout) == {"id": "run-warning-mixed-streams", "status": "completed"}
+    assert captured["loaded_path"] == "custom-run.yaml"
+    assert captured["submitted_pipeline"] is fake_pipeline
+    assert captured["wait_run_id"] == "run-warning-mixed-streams"
 
 
 def test_smoke_warn_preflight_includes_shell_bridge_json_when_available(monkeypatch):

@@ -752,7 +752,9 @@ def _doctor_shell_bridge_output(
 
 
 def _structured_output_from_run_output(output: RunOutputFormat) -> StructuredOutputFormat:
-    resolved_output = _resolve_run_output(output, err=True)
+    # Keep preflight/doctor payloads aligned with the stdout-facing run mode so wrappers can
+    # redirect stdout without unexpectedly flipping stderr back to a human summary.
+    resolved_output = _resolve_run_output(output, err=False)
     if resolved_output == RunOutputFormat.SUMMARY:
         return StructuredOutputFormat.SUMMARY
     if resolved_output == RunOutputFormat.JSON_SUMMARY:
