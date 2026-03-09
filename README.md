@@ -109,7 +109,7 @@ agentflow cancel <run-id>
 agentflow rerun <run-id>
 ```
 
-`agentflow runs` prints a compact summary of the runs already stored under `--runs-dir`, while `show` renders the same per-node summary for a single persisted run and still supports `--output json` or `--output json-summary`. `cancel` marks an active run as cancelling or cancels it immediately when it is still queued, and `rerun` re-executes the stored pipeline spec and waits for the fresh Codex/Claude/Kimi run to finish so the command behaves like a terminal-friendly replay.
+`agentflow runs` prints a compact summary of the most recent persisted runs under `--runs-dir` and defaults to the newest 20 entries so busy workspaces stay readable; pass `--limit 0` to show everything. `show` renders the same per-node summary for a single persisted run and still supports `--output json` or `--output json-summary`. `cancel` marks an active run as cancelling or cancels it immediately when it is still queued, and `rerun` re-executes the stored pipeline spec and waits for the fresh Codex/Claude/Kimi run to finish so the command behaves like a terminal-friendly replay.
 
 The bundled smoke preflight now matches that output mode too, so warning and failure reports stay in summary form by default and switch to JSON when you pass `--output json`.
 When those preflight checks detect a bash login startup bridge problem, the same smoke or run command now includes the ready-to-paste shell bridge recommendation inline instead of making you rerun Doctor separately.

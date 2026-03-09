@@ -2224,6 +2224,46 @@ def test_runs_supports_summary_output(monkeypatch):
     assert "- run-list-older: running - older-pipeline (7.0s)" in result.stdout
 
 
+def test_runs_defaults_to_first_twenty_records(monkeypatch):
+    records = [_completed_run(f"run-{index:02d}", pipeline_name=f"pipeline-{index:02d}") for index in range(25)]
+
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_store",
+        lambda runs_dir: SimpleNamespace(
+            list_runs=lambda: records,
+            run_dir=lambda run_id: Path(runs_dir) / run_id,
+        ),
+    )
+
+    result = runner.invoke(app, ["runs"])
+
+    assert result.exit_code == 0
+    assert "Runs: 20 of 25" in result.stdout
+    assert "run-00" in result.stdout
+    assert "run-19" in result.stdout
+    assert "run-20" not in result.stdout
+
+
+def test_runs_limit_zero_shows_all_records(monkeypatch):
+    records = [_completed_run(f"run-{index:02d}", pipeline_name=f"pipeline-{index:02d}") for index in range(25)]
+
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_store",
+        lambda runs_dir: SimpleNamespace(
+            list_runs=lambda: records,
+            run_dir=lambda run_id: Path(runs_dir) / run_id,
+        ),
+    )
+
+    result = runner.invoke(app, ["runs", "--limit", "0"])
+
+    assert result.exit_code == 0
+    assert "Runs: 25" in result.stdout
+    assert "run-24" in result.stdout
+
+
 def test_runs_supports_json_summary_output(monkeypatch):
     recent = _completed_run("run-list-json", pipeline_name="json-pipeline")
 

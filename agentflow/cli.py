@@ -352,12 +352,15 @@ def _build_runs_summary(records: list[object], *, store: object | None = None) -
     ]
 
 
-def _render_runs_summary(records: list[object], *, store: object | None = None) -> str:
+def _render_runs_summary(records: list[object], *, store: object | None = None, total: int | None = None) -> str:
     summaries = _build_runs_summary(records, store=store)
     if not summaries:
         return "No runs found."
 
-    lines = [f"Runs: {len(summaries)}"]
+    visible_count = len(summaries)
+    total_count = visible_count if total is None else total
+    header = f"Runs: {visible_count}" if total_count == visible_count else f"Runs: {visible_count} of {total_count}"
+    lines = [header]
     for summary in summaries:
         rendered = f"- {summary['id']}: {summary['status']}"
         pipeline = summary.get("pipeline")
@@ -370,9 +373,9 @@ def _render_runs_summary(records: list[object], *, store: object | None = None) 
     return "\n".join(lines)
 
 
-def _echo_runs_result(records: list[object], *, store: object | None, output: RunOutputFormat) -> None:
+def _echo_runs_result(records: list[object], *, store: object | None, output: RunOutputFormat, total: int | None = None) -> None:
     if output == RunOutputFormat.SUMMARY:
-        typer.echo(_render_runs_summary(records, store=store))
+        typer.echo(_render_runs_summary(records, store=store, total=total))
         return
     if output == RunOutputFormat.JSON_SUMMARY:
         typer.echo(json.dumps(_build_runs_summary(records, store=store), indent=2))
@@ -1100,9 +1103,12 @@ def validate(path: str) -> None:
 def runs(
     runs_dir: str = typer.Option(".agentflow/runs", envvar="AGENTFLOW_RUNS_DIR"),
     output: RunOutputFormat = typer.Option(RunOutputFormat.SUMMARY, "--output", help="Result output format."),
+    limit: int = typer.Option(20, min=0, help="Maximum runs to show. Use `0` to show all persisted runs."),
 ) -> None:
     store = _build_store(runs_dir)
-    _echo_runs_result(store.list_runs(), store=store, output=output)
+    all_runs = store.list_runs()
+    selected_runs = all_runs if limit == 0 else all_runs[:limit]
+    _echo_runs_result(selected_runs, store=store, output=output, total=len(all_runs))
 
 
 @app.command()
