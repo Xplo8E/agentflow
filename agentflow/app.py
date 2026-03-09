@@ -57,12 +57,12 @@ def create_app(*, store: RunStore | None = None, orchestrator: Orchestrator | No
     async def index(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
             "index.html",
-            {"request": request, "example": load_default_pipeline_yaml()},
+            {"request": request, "example": load_default_pipeline_yaml(), "base_dir": os.getcwd()},
         )
 
     @app.get("/api/examples/default")
     async def default_example() -> JSONResponse:
-        return JSONResponse({"yaml": load_default_pipeline_yaml()})
+        return JSONResponse({"yaml": load_default_pipeline_yaml(), "base_dir": os.getcwd()})
 
     @app.post("/api/runs/validate")
     async def validate_run(request: Request) -> JSONResponse:

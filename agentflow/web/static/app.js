@@ -361,9 +361,14 @@ async function openRun(runId) {
   connectStream(run.id);
 }
 
-async function validatePipeline() {
+function pipelinePayload() {
   const yaml = document.getElementById("pipeline-input").value;
-  const response = await api("/api/runs/validate", { method: "POST", body: JSON.stringify({ yaml }) });
+  const baseDir = document.getElementById("pipeline-base-dir").value.trim();
+  return baseDir ? { yaml, base_dir: baseDir } : { yaml };
+}
+
+async function validatePipeline() {
+  const response = await api("/api/runs/validate", { method: "POST", body: JSON.stringify(pipelinePayload()) });
   state.validationPipeline = response.pipeline;
   state.pipeline = null;
   state.nodes = {};
@@ -377,8 +382,7 @@ async function validatePipeline() {
 }
 
 async function runPipeline() {
-  const yaml = document.getElementById("pipeline-input").value;
-  const run = await api("/api/runs", { method: "POST", body: JSON.stringify({ yaml }) });
+  const run = await api("/api/runs", { method: "POST", body: JSON.stringify(pipelinePayload()) });
   state.validationPipeline = null;
   await refreshRuns();
   await openRun(run.id);
@@ -410,6 +414,7 @@ for (const button of document.querySelectorAll(".artifact-button")) {
 document.getElementById("load-example").onclick = async () => {
   const data = await api("/api/examples/default");
   document.getElementById("pipeline-input").value = data.yaml;
+  document.getElementById("pipeline-base-dir").value = data.base_dir || "";
   setBanner(null);
 };
 

@@ -34,6 +34,10 @@
             <button id="run-pipeline" class="primary">Run pipeline</button>
           </div>
         </div>
+        <div class="editor-controls">
+          <label class="small" for="pipeline-base-dir">Base dir for relative paths</label>
+          <input id="pipeline-base-dir" class="search mono path-input" type="text" value="{{ base_dir }}" placeholder="/path/to/repo">
+        </div>
         <textarea id="pipeline-input">{{ example }}</textarea>
       </section>
 

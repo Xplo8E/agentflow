@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 
 from fastapi.testclient import TestClient
 
@@ -44,6 +45,7 @@ def test_api_returns_default_example_payload(tmp_path):
     response = client.get("/api/examples/default")
     assert response.status_code == 200
     assert "parallel-code-orchestration" in response.json()["yaml"]
+    assert response.json()["base_dir"] == os.getcwd()
 
 
 def test_api_supports_validation_and_artifacts(tmp_path):

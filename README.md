@@ -170,6 +170,8 @@ agentflow serve --host 127.0.0.1 --port 8000
 
 Open `http://127.0.0.1:8000`.
 
+When you validate or run inline YAML from the web console, the "Base dir for relative paths" field controls how relative `working_dir` and local `target.cwd` values resolve. It defaults to the server process working directory. API clients can send that same hint as `base_dir`, or skip inline YAML entirely and send `pipeline_path` to reuse the CLI's file-based path resolution.
+
 ## Runtime configuration
 
 You can configure the runtime via CLI flags or environment variables.
