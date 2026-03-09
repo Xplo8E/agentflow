@@ -3656,7 +3656,7 @@ def test_run_uses_runtime_env_vars(monkeypatch):
     monkeypatch.setattr(agentflow.cli, "_build_runtime", fake_build_runtime)
     monkeypatch.setattr(agentflow.cli, "_load_pipeline", lambda path: fake_pipeline)
 
-    result = runner.invoke(app, ["run", "pipeline.yaml"])
+    result = runner.invoke(app, ["run", "pipeline.yaml", "--output", "json"])
 
     assert result.exit_code == 0
     assert json.loads(result.stdout) == {"id": "run-123", "status": "completed"}
@@ -4179,7 +4179,7 @@ def test_run_skips_preflight_for_custom_pipeline_in_auto_mode(monkeypatch):
     fake_pipeline = object()
     monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
 
-    result = runner.invoke(app, ["run", "custom-run.yaml"])
+    result = runner.invoke(app, ["run", "custom-run.yaml", "--output", "json"])
 
     assert result.exit_code == 0
     assert json.loads(result.stdout) == {"id": "run-custom", "status": "completed"}
@@ -4607,7 +4607,7 @@ def test_run_runs_preflight_for_explicit_bundled_pipeline_path(monkeypatch):
     fake_pipeline = object()
     monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
 
-    result = runner.invoke(app, ["run", bundled_path])
+    result = runner.invoke(app, ["run", bundled_path, "--output", "json"])
 
     assert result.exit_code == 0
     assert doctor_calls == 1
@@ -4739,7 +4739,7 @@ def test_run_stops_when_detected_preflight_fails(monkeypatch):
     monkeypatch.setattr(agentflow.cli, "_load_pipeline", lambda path: (_ for _ in ()).throw(AssertionError("pipeline should not load")))
     monkeypatch.setattr(agentflow.cli, "_build_runtime", lambda runs_dir, max_concurrent_runs: (_ for _ in ()).throw(AssertionError("runtime should not build")))
 
-    result = runner.invoke(app, ["run", bundled_path])
+    result = runner.invoke(app, ["run", bundled_path, "--output", "json"])
 
     assert result.exit_code == 1
     assert json.loads(result.stdout) == {
