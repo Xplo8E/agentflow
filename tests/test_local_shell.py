@@ -8,6 +8,7 @@ import pytest
 from agentflow.local_shell import (
     kimi_shell_init_requires_bash_warning,
     kimi_shell_init_requires_interactive_bash_warning,
+    probe_target_bash_startup_env_var,
     shell_command_prefixes_env_var,
     shell_init_exports_env_var,
     shell_command_uses_kimi_helper,
@@ -770,6 +771,35 @@ def test_target_bash_startup_exports_env_var_returns_false_when_probe_times_out(
     assert target_bash_startup_exports_env_var(target, "ANTHROPIC_API_KEY", home=home) is False
     assert observed["command"] == ["bash", "-lc", 'test -n "${ANTHROPIC_API_KEY:-}"']
     assert observed["timeout"] == 5.0
+
+
+def test_probe_target_bash_startup_env_var_ignores_ambient_value(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    observed: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        observed["env"] = dict(kwargs["env"])
+        return subprocess.CompletedProcess(args=command, returncode=1, stdout="", stderr="")
+
+    monkeypatch.setattr("agentflow.local_shell.subprocess.run", fake_run)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ambient-key")
+
+    target = {
+        "kind": "local",
+        "shell": "bash",
+        "shell_login": True,
+    }
+
+    probe = probe_target_bash_startup_env_var(target, "ANTHROPIC_API_KEY", home=home)
+
+    assert probe.exported is False
+    assert probe.timeout_seconds is None
+    assert observed["env"]["HOME"] == str(home)
+    assert "ANTHROPIC_API_KEY" not in observed["env"]
 
 
 def test_target_bash_startup_exports_env_var_uses_configured_probe_timeout(

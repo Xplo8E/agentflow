@@ -1423,6 +1423,7 @@ def probe_target_bash_startup_env_var(
     effective_home = target_bash_home(target, home=home, env=env, cwd=cwd)
     launch_env = os.environ.copy()
     launch_env["HOME"] = str(effective_home)
+    launch_env.pop(env_var, None)
 
     bash_flag = "-"
     if uses_login_bash:
