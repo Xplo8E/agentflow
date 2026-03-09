@@ -483,11 +483,18 @@ def _bootstrap_home(
     return str(effective_home)
 
 
+def _auth_summary_depends_on_local_shell_bootstrap(auth_summary: str | None) -> bool:
+    if not isinstance(auth_summary, str):
+        return False
+    return auth_summary.startswith("expects `") and "local shell bootstrap" in auth_summary
+
+
 def _target_shell_bridge(
     target: dict[str, Any],
     launch_env: dict[str, str] | None = None,
     *,
     cwd: str | None = None,
+    auth_summary: str | None = None,
 ) -> dict[str, str] | None:
     if target.get("kind") != "local" or not target_uses_login_bash(target):
         return None
@@ -499,7 +506,11 @@ def _target_shell_bridge(
         return None
 
     login_startup_file = target_bash_login_startup_file(target, env=launch_env, cwd=cwd)
-    if login_startup_file is not None and _kimi_helper_bootstrap_source(target) is None:
+    if (
+        login_startup_file is not None
+        and _kimi_helper_bootstrap_source(target) is None
+        and not _auth_summary_depends_on_local_shell_bootstrap(auth_summary)
+    ):
         return None
 
     effective_home = target_bash_home(target, env=launch_env, cwd=cwd)
@@ -514,6 +525,7 @@ def _target_warnings(
     launch_env: dict[str, str] | None = None,
     *,
     cwd: str | None = None,
+    auth_summary: str | None = None,
 ) -> list[str]:
     warnings: list[str] = []
 
@@ -522,7 +534,9 @@ def _target_warnings(
     login_startup_warning = target_bash_login_startup_warning(target, env=launch_env, cwd=cwd)
     login_startup_file = target_bash_login_startup_file(target, env=launch_env, cwd=cwd)
     if login_startup_warning is not None and (
-        login_startup_file is None or _kimi_helper_bootstrap_source(target) is not None
+        login_startup_file is None
+        or _kimi_helper_bootstrap_source(target) is not None
+        or _auth_summary_depends_on_local_shell_bootstrap(auth_summary)
     ):
         warnings.append(login_startup_warning)
 
@@ -965,7 +979,12 @@ def build_launch_inspection(
         bootstrap_home = _bootstrap_home(node_plan["target"], prepared.env, cwd=prepared.cwd)
         if bootstrap_home:
             node_plan["bootstrap_home"] = bootstrap_home
-        shell_bridge = _target_shell_bridge(node_plan["target"], prepared.env, cwd=prepared.cwd)
+        shell_bridge = _target_shell_bridge(
+            node_plan["target"],
+            prepared.env,
+            cwd=prepared.cwd,
+            auth_summary=auth_summary,
+        )
         if shell_bridge:
             node_plan["shell_bridge"] = shell_bridge
         launch_env_overrides = _launch_env_override_details(node, resolved_provider, prepared.env)
@@ -988,7 +1007,12 @@ def build_launch_inspection(
         if launch_env_inheritances:
             node_plan["launch_env_inheritances"] = launch_env_inheritances
         node_plan["warnings"] = (
-            _target_warnings(node_plan["target"], prepared.env, cwd=prepared.cwd)
+            _target_warnings(
+                node_plan["target"],
+                prepared.env,
+                cwd=prepared.cwd,
+                auth_summary=auth_summary,
+            )
             + _launch_env_override_warnings(node, resolved_provider, prepared.env)
             + _bootstrap_env_override_warnings(node, resolved_provider, prepared.env, cwd=prepared.cwd)
             + _launch_env_inheritance_warnings(node, resolved_provider, prepared.env, cwd=prepared.cwd)
