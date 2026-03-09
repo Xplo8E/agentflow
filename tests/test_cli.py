@@ -8218,7 +8218,7 @@ def test_doctor_shell_bridge_summary_reports_when_no_fix_is_needed(monkeypatch):
     assert result.stdout == "Doctor: ok\n- kimi_shell_helper: ok - ready\nShell bridge suggestion: not needed\n"
 
 
-def test_doctor_with_pipeline_path_does_not_auto_include_unneeded_shell_bridge(tmp_path, monkeypatch):
+def test_doctor_with_pipeline_path_warns_for_custom_home_login_startup(tmp_path, monkeypatch):
     _disable_local_readiness_probes(monkeypatch)
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
 
@@ -8247,9 +8247,19 @@ nodes:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload == {
-        "status": "ok",
-        "counts": {"ok": 0, "warning": 0, "failed": 0},
-        "checks": [],
+        "status": "warning",
+        "counts": {"ok": 0, "warning": 1, "failed": 0},
+        "checks": [
+            {
+                "name": "bash_login_startup",
+                "status": "warning",
+                "detail": (
+                    f"Node `plan` uses bash login startup from `{custom_home.resolve()}`: "
+                    "Bash login startup will not load any user file from `HOME` because "
+                    "`~/.bash_profile`, `~/.bash_login`, and `~/.profile` are all missing."
+                ),
+            }
+        ],
         "pipeline": {
             "auto_preflight": {
                 "enabled": False,
@@ -8258,7 +8268,93 @@ nodes:
                 "match_summary": [],
             }
         },
+        "shell_bridge": build_bash_login_shell_bridge_recommendation(home=custom_home).as_dict(),
     }
+
+
+def test_check_local_warns_for_custom_home_login_startup(tmp_path, monkeypatch):
+    _disable_local_readiness_probes(monkeypatch)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+    captured: dict[str, object] = {}
+
+    class FakeOrchestrator:
+        async def submit(self, pipeline: object):
+            captured["submitted_pipeline"] = pipeline
+            return SimpleNamespace(id="check-local-custom-home")
+
+        async def wait(self, run_id: str, timeout: float | None = None):
+            captured["wait_run_id"] = run_id
+            return _completed_run(run_id, pipeline_name="doctor-noisy-shell-bridge")
+
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_runtime",
+        lambda runs_dir, max_concurrent_runs: (
+            SimpleNamespace(run_dir=lambda run_id: Path(runs_dir) / run_id),
+            FakeOrchestrator(),
+        ),
+    )
+
+    custom_home = tmp_path / "custom-home"
+    custom_home.mkdir()
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        f"""name: doctor-noisy-shell-bridge
+working_dir: .
+nodes:
+  - id: plan
+    agent: codex
+    prompt: hi
+    env:
+      OPENAI_BASE_URL: ""
+    target:
+      kind: local
+      shell: "env HOME={custom_home} bash"
+      shell_login: true
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["check-local", str(pipeline_path), "--output", "json-summary"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stderr) == {
+        "status": "warning",
+        "counts": {"ok": 0, "warning": 1, "failed": 0},
+        "checks": [
+            {
+                "name": "bash_login_startup",
+                "status": "warning",
+                "detail": (
+                    f"Node `plan` uses bash login startup from `{custom_home.resolve()}`: "
+                    "Bash login startup will not load any user file from `HOME` because "
+                    "`~/.bash_profile`, `~/.bash_login`, and `~/.profile` are all missing."
+                ),
+            }
+        ],
+        "pipeline": {
+            "auto_preflight": {
+                "enabled": False,
+                "reason": "path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.",
+                "matches": [],
+                "match_summary": [],
+            }
+        },
+        "shell_bridge": build_bash_login_shell_bridge_recommendation(home=custom_home).as_dict(),
+    }
+    assert json.loads(result.stdout) == {
+        "id": "check-local-custom-home",
+        "status": "completed",
+        "pipeline": {"name": "doctor-noisy-shell-bridge"},
+        "started_at": "2026-03-08T04:11:03+00:00",
+        "finished_at": "2026-03-08T04:11:10+00:00",
+        "duration": "7.0s",
+        "duration_seconds": 7.0,
+        "run_dir": ".agentflow/runs/check-local-custom-home",
+        "nodes": [],
+    }
+    assert captured["wait_run_id"] == "check-local-custom-home"
 
 
 def test_doctor_with_pipeline_path_auto_includes_shell_bridge_when_auth_depends_on_login_startup(tmp_path, monkeypatch):
