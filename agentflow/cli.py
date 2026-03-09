@@ -440,7 +440,7 @@ def _doctor_report_for_path(path: str | None = None) -> tuple[object, dict[str, 
             pipeline = _load_pipeline(default_smoke_pipeline_path())
         except typer.Exit:
             return report, None, None
-        return _extend_doctor_report(report, _pipeline_launch_env_override_checks(pipeline)), None, pipeline
+        return _augment_preflight_report(report, pipeline), None, pipeline
     pipeline = _load_pipeline(path)
     if not _path_matches_bundled_smoke(path) and not _pipeline_uses_kimi_smoke_preflight(pipeline):
         report = _empty_doctor_report()
@@ -747,7 +747,7 @@ def _load_pipeline_with_optional_smoke_preflight(
             report = _augment_preflight_report(report, pipeline)
         elif selected_path_matches_bundled and _status_value(getattr(report, "status", "ok")) != "failed":
             preflight_pipeline = _load_pipeline(selected_path)
-            report = _extend_doctor_report(report, _pipeline_launch_env_override_checks(preflight_pipeline))
+            report = _augment_preflight_report(report, preflight_pipeline)
         doctor_output = _structured_output_from_run_output(output)
         shell_bridge = _preflight_shell_bridge_recommendation(report)
         include_shell_bridge = shell_bridge is not None

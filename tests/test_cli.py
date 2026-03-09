@@ -2497,6 +2497,85 @@ def test_run_runs_preflight_for_explicit_bundled_pipeline_path(monkeypatch):
     assert captured["wait_timeout"] is None
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["run"],
+        ["smoke"],
+    ],
+)
+def test_run_and_smoke_bundled_preflight_applies_pipeline_shell_checks(monkeypatch, command):
+    bundled_path = str((Path.cwd() / "examples/local-real-agents-kimi-smoke.yaml").resolve())
+
+    monkeypatch.setattr(
+        agentflow.cli,
+        "build_local_smoke_doctor_report",
+        lambda: DoctorReport(
+            status="ok",
+            checks=[DoctorCheck(name="kimi_shell_helper", status="ok", detail="ready")],
+        ),
+    )
+    monkeypatch.setattr(agentflow.cli, "default_smoke_pipeline_path", lambda: bundled_path)
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_run_pipeline",
+        lambda pipeline, runs_dir, max_concurrent_runs, output: pytest.fail("pipeline should not run"),
+    )
+
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="review",
+                agent=SimpleNamespace(value="claude"),
+                provider="kimi",
+                env={},
+                target=SimpleNamespace(
+                    kind="local",
+                    shell="sh",
+                    shell_init="kimi",
+                    shell_login=False,
+                    shell_interactive=False,
+                    cwd=None,
+                ),
+            )
+        ]
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", lambda path: fake_pipeline)
+
+    args = [*command, bundled_path, "--output", "json"] if command[0] == "run" else [*command, "--output", "json"]
+    if command[0] == "smoke":
+        args = [*command, "--output", "json"]
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "status": "failed",
+        "checks": [
+            {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
+            {
+                "name": "kimi_shell_bootstrap",
+                "status": "failed",
+                "detail": "Node `review`: `shell_init: kimi` requires bash-style shell bootstrap, but `target.shell` resolves to `sh`. Use `shell: bash` with `target.shell_login: true` and `target.shell_interactive: true`, use `bash -lic`, or export provider variables directly.",
+            },
+        ],
+        "pipeline": {
+            "auto_preflight": {
+                "enabled": True,
+                "reason": "path matches the bundled real-agent smoke pipeline.",
+                "matches": [
+                    {
+                        "node_id": "review",
+                        "agent": "claude",
+                        "trigger": "target.shell_init",
+                    }
+                ],
+                "match_summary": ["review (claude) via `target.shell_init`"],
+            }
+        },
+    }
+
+
 def test_run_can_disable_preflight_for_bundled_pipeline(monkeypatch):
     captured: dict[str, object] = {}
 
@@ -4468,6 +4547,50 @@ nodes:
         "- kimi_shell_helper: ok - ready\n"
         "- launch_env_override: ok - Node `review`: Launch env uses configured `ANTHROPIC_BASE_URL` value `https://api.kimi.com/coding/` instead of current `https://open.bigmodel.cn/api/anthropic` via `provider.base_url`.\n"
     )
+
+
+def test_doctor_without_path_applies_bundled_pipeline_shell_checks(tmp_path, monkeypatch):
+    pipeline_path = tmp_path / "bundled-smoke.yaml"
+    pipeline_path.write_text(
+        """name: bundled-smoke
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    provider: kimi
+    prompt: hi
+    target:
+      kind: local
+      shell: sh
+      shell_init: kimi
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        agentflow.cli,
+        "build_local_smoke_doctor_report",
+        lambda: DoctorReport(
+            status="ok",
+            checks=[DoctorCheck(name="kimi_shell_helper", status="ok", detail="ready")],
+        ),
+    )
+    monkeypatch.setattr(agentflow.cli, "default_smoke_pipeline_path", lambda: str(pipeline_path))
+
+    result = runner.invoke(app, ["doctor", "--output", "json"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "status": "failed",
+        "checks": [
+            {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
+            {
+                "name": "kimi_shell_bootstrap",
+                "status": "failed",
+                "detail": "Node `review`: `shell_init: kimi` requires bash-style shell bootstrap, but `target.shell` resolves to `sh`. Use `shell: bash` with `target.shell_login: true` and `target.shell_interactive: true`, use `bash -lic`, or export provider variables directly.",
+            },
+        ],
+    }
 
 
 def test_doctor_can_include_shell_bridge_in_json_output(monkeypatch):
