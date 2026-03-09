@@ -2156,6 +2156,49 @@ def test_run_uses_runtime_env_vars(monkeypatch):
     assert captured["wait_timeout"] is None
 
 
+def test_run_defaults_to_summary_on_tty(monkeypatch):
+    class FakeOrchestrator:
+        async def submit(self, pipeline: object):
+            return SimpleNamespace(id="run-auto-summary")
+
+        async def wait(self, run_id: str, timeout: float | None = None):
+            return _completed_run(
+                run_id,
+                pipeline_name="auto-summary-pipeline",
+                pipeline_nodes=[
+                    SimpleNamespace(
+                        id="codex_plan",
+                        agent=SimpleNamespace(value="codex"),
+                        model="gpt-5-codex",
+                        provider=None,
+                    )
+                ],
+                nodes={
+                    "codex_plan": SimpleNamespace(
+                        status=SimpleNamespace(value="completed"),
+                        current_attempt=1,
+                        attempts=[SimpleNamespace(number=1)],
+                        exit_code=0,
+                        final_response="codex ok",
+                        output="codex ok",
+                        stderr_lines=[],
+                    )
+                },
+            )
+
+    monkeypatch.setattr(agentflow.cli, "_build_runtime", lambda runs_dir, max_concurrent_runs: (SimpleNamespace(run_dir=lambda run_id: Path(runs_dir) / run_id), FakeOrchestrator()))
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", lambda path: object())
+    monkeypatch.setattr(agentflow.cli, "_stream_supports_tty_summary", lambda *, err: not err)
+
+    result = runner.invoke(app, ["run", "pipeline.yaml"])
+
+    assert result.exit_code == 0
+    assert "Run run-auto-summary: completed" in result.stdout
+    assert "Pipeline: auto-summary-pipeline" in result.stdout
+    assert "Run dir: .agentflow/runs/run-auto-summary" in result.stdout
+    assert "- codex_plan [codex, model=gpt-5-codex]: completed (attempt 1, exit 0) - codex ok" in result.stdout
+
+
 def test_run_supports_summary_output(monkeypatch):
     class FakeOrchestrator:
         async def submit(self, pipeline: object):

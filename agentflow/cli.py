@@ -55,6 +55,7 @@ class InspectionOutputFormat(StrEnum):
 
 
 class RunOutputFormat(StrEnum):
+    AUTO = "auto"
     JSON = "json"
     JSON_SUMMARY = "json-summary"
     SUMMARY = "summary"
@@ -323,11 +324,20 @@ def _render_run_summary(record: object, run_dir: Path | str | None = None) -> st
     return "\n".join(lines)
 
 
+def _resolve_run_output(output: RunOutputFormat, *, err: bool = False) -> RunOutputFormat:
+    if output != RunOutputFormat.AUTO:
+        return output
+    if _stream_supports_tty_summary(err=err):
+        return RunOutputFormat.SUMMARY
+    return RunOutputFormat.JSON
+
+
 def _echo_run_result(record: object, *, output: RunOutputFormat, run_dir: Path | str | None = None) -> None:
-    if output == RunOutputFormat.SUMMARY:
+    resolved_output = _resolve_run_output(output)
+    if resolved_output == RunOutputFormat.SUMMARY:
         typer.echo(_render_run_summary(record, run_dir=run_dir))
         return
-    if output == RunOutputFormat.JSON_SUMMARY:
+    if resolved_output == RunOutputFormat.JSON_SUMMARY:
         typer.echo(json.dumps(_build_run_summary(record, run_dir=run_dir), indent=2))
         return
     typer.echo(json.dumps(record.model_dump(mode="json"), indent=2))
@@ -374,10 +384,11 @@ def _render_runs_summary(records: list[object], *, store: object | None = None, 
 
 
 def _echo_runs_result(records: list[object], *, store: object | None, output: RunOutputFormat, total: int | None = None) -> None:
-    if output == RunOutputFormat.SUMMARY:
+    resolved_output = _resolve_run_output(output)
+    if resolved_output == RunOutputFormat.SUMMARY:
         typer.echo(_render_runs_summary(records, store=store, total=total))
         return
-    if output == RunOutputFormat.JSON_SUMMARY:
+    if resolved_output == RunOutputFormat.JSON_SUMMARY:
         typer.echo(json.dumps(_build_runs_summary(records, store=store), indent=2))
         return
 
@@ -584,7 +595,8 @@ def _doctor_shell_bridge_output(report: object, *, requested: bool) -> tuple[boo
 
 
 def _structured_output_from_run_output(output: RunOutputFormat) -> StructuredOutputFormat:
-    if output == RunOutputFormat.SUMMARY:
+    resolved_output = _resolve_run_output(output, err=True)
+    if resolved_output == RunOutputFormat.SUMMARY:
         return StructuredOutputFormat.SUMMARY
     return StructuredOutputFormat.JSON
 
@@ -1194,7 +1206,11 @@ def run(
     path: str,
     runs_dir: str = typer.Option(".agentflow/runs", envvar="AGENTFLOW_RUNS_DIR"),
     max_concurrent_runs: int = typer.Option(2, envvar="AGENTFLOW_MAX_CONCURRENT_RUNS"),
-    output: RunOutputFormat = typer.Option(RunOutputFormat.JSON, "--output", help="Result output format."),
+    output: RunOutputFormat = typer.Option(
+        RunOutputFormat.AUTO,
+        "--output",
+        help="Result output format. Defaults to `summary` on a terminal and `json` otherwise.",
+    ),
     preflight: SmokePreflightMode = typer.Option(
         SmokePreflightMode.AUTO,
         "--preflight",
