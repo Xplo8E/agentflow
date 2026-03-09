@@ -32,6 +32,7 @@ from agentflow.utils import looks_sensitive_key, redact_sensitive_shell_text, re
 _REDACTED = "<redacted>"
 _GENERATED = "<generated>"
 _INSPECT_PLACEHOLDER_PREFIX = "<inspect placeholder for nodes."
+_KIMI_ANTHROPIC_BASE_URL = "https://api.kimi.com/coding/"
 
 
 def _auto_preflight_summary(value: Any) -> str | None:
@@ -607,12 +608,6 @@ def _bootstrap_env_override_details(
     if not api_key_env:
         return []
 
-    if api_key_env == "ANTHROPIC_API_KEY" and not any(
-        str(detail.get("key") or "") == "ANTHROPIC_BASE_URL"
-        for detail in _launch_env_override_details(node, resolved_provider, launch_env)
-    ):
-        return []
-
     current_value = str(os.getenv(api_key_env, "") or "").strip()
     if not current_value:
         return []
@@ -626,6 +621,18 @@ def _bootstrap_env_override_details(
     )
     if source is None:
         return []
+    if api_key_env == "ANTHROPIC_API_KEY":
+        base_url_overridden = any(
+            str(detail.get("key") or "") == "ANTHROPIC_BASE_URL"
+            for detail in _launch_env_override_details(node, resolved_provider, launch_env)
+        )
+        current_base_url = str(os.getenv("ANTHROPIC_BASE_URL", "") or "").strip().rstrip("/")
+        kimi_base_url = _KIMI_ANTHROPIC_BASE_URL.rstrip("/")
+        if source.get("helper") == "kimi":
+            if not base_url_overridden and current_base_url != kimi_base_url:
+                return []
+        elif not base_url_overridden:
+            return []
 
     detail: dict[str, Any] = {"key": api_key_env}
     if looks_sensitive_key(api_key_env):
