@@ -119,6 +119,26 @@ def test_make_python_target_prints_repo_python_path() -> None:
     assert completed.stderr == ""
 
 
+def test_make_help_verify_local_mentions_bundled_smoke_local() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+
+    completed = subprocess.run(
+        ["make", "-s", "help"],
+        capture_output=True,
+        cwd=repo_root,
+        env=os.environ,
+        text=True,
+        timeout=5,
+    )
+
+    assert completed.returncode == 0
+    assert (
+        "verify-local  Run the full local Codex + Claude-on-Kimi verification stack across bundled "
+        "toolchain-local/inspect-local/doctor-local/smoke-local/check-local"
+    ) in completed.stdout
+    assert completed.stderr == ""
+
+
 def test_verify_local_kimi_shell_script_requires_kimi_to_export_anthropic_env(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
