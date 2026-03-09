@@ -991,15 +991,70 @@ def _format_bash_startup_paths(paths: tuple[str, ...]) -> str:
 def bash_login_shell_loads_command(
     command_name: str,
     *,
+    shell: str | None = None,
     home: Path | None = None,
     cwd: Path | str | None = None,
     env: dict[str, str] | None = None,
 ) -> bool:
+    normalized_command_name = command_name.strip()
+    if not normalized_command_name:
+        return False
+
     resolved_home = _resolved_home_path(home)
     startup_file = _bash_login_startup_file(resolved_home)
     if startup_file is None:
+        static_match = False
+    else:
+        static_match = _shell_file_exposes_command(
+            startup_file,
+            normalized_command_name,
+            home=resolved_home,
+            cwd=cwd,
+            env=env,
+        )
+    if static_match:
+        return True
+
+    if home is None and cwd is None and env is None and not isinstance(shell, str):
         return False
-    return _shell_file_exposes_command(startup_file, command_name, home=resolved_home, cwd=cwd, env=env)
+
+    bash_shell = shell if isinstance(shell, str) else None
+    effective_home = _shell_command_effective_home_for_target(
+        bash_shell,
+        "bash",
+        home=resolved_home,
+        cwd=cwd,
+    )
+    shell_env = _shell_command_prefix_env_for_target(bash_shell, "bash")
+    launch_env = os.environ.copy()
+    if isinstance(env, dict):
+        for key, value in env.items():
+            key_text = str(key)
+            if value is None:
+                launch_env.pop(key_text, None)
+                continue
+            launch_env[key_text] = str(value)
+    launch_env.update(shell_env)
+    launch_env["HOME"] = str(effective_home)
+
+    try:
+        result = subprocess.run(
+            [
+                _shell_command_program_for_target(bash_shell, "bash") or "bash",
+                "-lc",
+                f"command -v {shlex.quote(normalized_command_name)} >/dev/null 2>&1",
+            ],
+            check=False,
+            capture_output=True,
+            cwd=str(_resolved_shell_cwd(cwd)),
+            env=launch_env,
+            text=True,
+            timeout=_bash_startup_probe_timeout_seconds(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+    return result.returncode == 0
 
 
 def _shell_command_loads_kimi_from_bash_env(
@@ -2233,6 +2288,7 @@ def kimi_shell_init_requires_interactive_bash_warning(
     )
     login_shell_loads_kimi = uses_login_bash and not login_startup_disabled and bash_login_shell_loads_command(
         "kimi",
+        shell=shell if isinstance(shell, str) else None,
         home=effective_home,
         cwd=cwd,
         env=env,
