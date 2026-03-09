@@ -39,6 +39,7 @@ _EXPECTED_KIMI_ANTHROPIC_BASE_URL = "https://api.kimi.com/coding/"
 _REDACTED = "<redacted>"
 _BASH_INTERACTIVE_STDERR_NOISE = (
     "bash: cannot set terminal process group (",
+    "bash: initialize_job_control: no job control in background:",
     "bash: no job control in this shell",
 )
 _DIAGNOSTIC_TOKEN_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")

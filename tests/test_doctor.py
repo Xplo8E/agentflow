@@ -936,6 +936,7 @@ def test_local_smoke_doctor_report_redacts_sensitive_unknown_kimi_stderr(tmp_pat
             stdout="",
             stderr=(
                 "bash: cannot set terminal process group (1234): Inappropriate ioctl for device\n"
+                "bash: initialize_job_control: no job control in background: Bad file descriptor\n"
                 "bash: no job control in this shell\n"
                 "export ANTHROPIC_API_KEY=super-secret\n"
                 "Authorization: Bearer top-secret\n"
