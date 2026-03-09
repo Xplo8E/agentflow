@@ -599,6 +599,28 @@ def test_target_bash_startup_exports_env_var_checks_login_shell_startup(
     assert observed["env"]["HOME"] == str(home)
 
 
+def test_target_bash_startup_exports_env_var_uses_launch_cwd_for_relative_profile_sources(tmp_path: Path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f .bashrc ]; then . .bashrc; fi\n', encoding="utf-8")
+    (home / ".bashrc").write_text("export AGENTFLOW_TEST_STARTUP_TOKEN=from-bashrc\n", encoding="utf-8")
+    target = {
+        "kind": "local",
+        "shell": "bash",
+        "shell_login": True,
+    }
+
+    assert (
+        target_bash_startup_exports_env_var(
+            target,
+            "AGENTFLOW_TEST_STARTUP_TOKEN",
+            home=home,
+            cwd=home,
+        )
+        is True
+    )
+
+
 def test_shell_template_exports_env_var_before_command_detects_prefix_env_wrapper():
     assert (
         shell_template_exports_env_var_before_command(
@@ -713,6 +735,19 @@ def test_target_bash_login_startup_chain_ignores_echoed_source_text(
     }
 
     assert target_bash_login_startup_chain(target) == ("~/.profile",)
+
+
+def test_target_bash_login_startup_chain_uses_launch_cwd_for_relative_profile_sources(tmp_path: Path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f .bashrc ]; then . .bashrc; fi\n', encoding="utf-8")
+    target = {
+        "kind": "local",
+        "shell": "bash",
+        "shell_login": True,
+    }
+
+    assert target_bash_login_startup_chain(target, home=home, cwd=home) == ("~/.profile", "~/.bashrc")
 
 
 @pytest.mark.parametrize(

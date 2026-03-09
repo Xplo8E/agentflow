@@ -328,22 +328,38 @@ def _resolved_home_path(home: Path | None) -> Path:
     return (home or Path.home()).expanduser()
 
 
+def _resolved_shell_cwd(cwd: Path | str | None) -> Path:
+    if cwd is None:
+        return Path.cwd().resolve()
+    text = str(cwd).strip()
+    if not text:
+        return Path.cwd().resolve()
+    return Path(text).expanduser().resolve()
+
+
 def _home_relative_shell_path(home: Path, path: Path) -> str:
     normalized_home = _resolved_home_path(home).resolve()
     normalized_path = Path(os.path.normpath(str(path if path.is_absolute() else normalized_home / path)))
     return normalized_path.relative_to(normalized_home).as_posix()
 
 
-def _shell_command_effective_home_for_target(command: str | None, target: str, *, home: Path | None = None) -> Path:
+def _shell_command_effective_home_for_target(
+    command: str | None,
+    target: str,
+    *,
+    home: Path | None = None,
+    cwd: Path | str | None = None,
+) -> Path:
     resolved_home = _resolved_home_path(home)
     home_value = _shell_command_prefix_env_value_for_target(command, "HOME", target)
     if not home_value:
         return resolved_home
-    return _resolve_shell_path(home_value, home=resolved_home)
+    return _resolve_shell_path(home_value, home=resolved_home, cwd=cwd)
 
 
-def _resolve_shell_path(path: str, *, home: Path | None = None) -> Path:
+def _resolve_shell_path(path: str, *, home: Path | None = None, cwd: Path | str | None = None) -> Path:
     resolved_home = _resolved_home_path(home)
+    resolved_cwd = _resolved_shell_cwd(cwd)
     normalized = path.strip()
     if normalized == "~":
         expanded = str(resolved_home)
@@ -354,8 +370,8 @@ def _resolve_shell_path(path: str, *, home: Path | None = None) -> Path:
         expanded = os.path.expanduser(expanded)
     candidate = Path(expanded)
     if not candidate.is_absolute():
-        candidate = Path.cwd() / candidate
-    return candidate
+        candidate = resolved_cwd / candidate
+    return Path(os.path.normpath(str(candidate)))
 
 
 def _resolve_static_path_entry(path_entry: str, *, home: Path) -> Path | None:
@@ -523,33 +539,14 @@ def _iter_shell_source_targets(text: str) -> tuple[str, ...]:
     return tuple(targets)
 
 
-def _resolve_home_shell_source_target(token: str, home: Path) -> Path | None:
+def _resolve_shell_source_target(token: str, *, home: Path, cwd: Path | str | None = None) -> Path | None:
     normalized = token.rstrip(";)")
     if not normalized:
         return None
 
-    resolved_home = home.resolve()
-    if normalized.startswith("~/"):
-        candidate = resolved_home / normalized[2:]
-    elif normalized.startswith("$HOME/"):
-        candidate = resolved_home / normalized[6:]
-    elif normalized.startswith("${HOME}/"):
-        candidate = resolved_home / normalized[8:]
-    elif normalized.startswith("$"):
+    if normalized.startswith("$") and not normalized.startswith(("$HOME", "${HOME}")):
         return None
-    else:
-        raw_path = Path(normalized)
-        if not raw_path.is_absolute():
-            return None
-        candidate = raw_path
-
-    candidate = Path(os.path.normpath(str(candidate)))
-
-    try:
-        candidate.relative_to(resolved_home)
-    except ValueError:
-        return None
-    return candidate
+    return _resolve_shell_path(normalized, home=home, cwd=cwd)
 
 
 def _read_shell_file_text(path: Path) -> str | None:
@@ -582,6 +579,7 @@ def _shell_file_exports_env_var(
     env_var: str,
     *,
     home: Path | None = None,
+    cwd: Path | str | None = None,
     visited: set[Path] | None = None,
 ) -> bool:
     resolved_path = Path(os.path.normpath(str(path.resolve(strict=False))))
@@ -600,8 +598,10 @@ def _shell_file_exports_env_var(
     resolved_home = _resolved_home_path(home)
     next_seen = seen | {resolved_path}
     for token in _iter_shell_source_targets(text):
-        target = _resolve_shell_path(token, home=resolved_home)
-        if _shell_file_exports_env_var(target, env_var, home=resolved_home, visited=next_seen):
+        target = _resolve_shell_source_target(token, home=resolved_home, cwd=cwd)
+        if target is None:
+            continue
+        if _shell_file_exports_env_var(target, env_var, home=resolved_home, cwd=cwd, visited=next_seen):
             return True
     return False
 
@@ -611,6 +611,7 @@ def _shell_file_loads_function(
     function_name: str,
     *,
     home: Path | None = None,
+    cwd: Path | str | None = None,
     visited: set[Path] | None = None,
 ) -> bool:
     resolved_path = Path(os.path.normpath(str(path.resolve(strict=False))))
@@ -631,10 +632,10 @@ def _shell_file_loads_function(
 
     resolved_home = _resolved_home_path(home)
     for token in _iter_shell_source_targets(text):
-        target = _resolve_home_shell_source_target(token, resolved_home)
+        target = _resolve_shell_source_target(token, home=resolved_home, cwd=cwd)
         if target is None:
             continue
-        if _shell_file_loads_function(target, function_name, home=resolved_home, visited=seen):
+        if _shell_file_loads_function(target, function_name, home=resolved_home, cwd=cwd, visited=seen):
             return True
     return False
 
@@ -644,6 +645,7 @@ def _shell_file_exposes_command(
     command_name: str,
     *,
     home: Path | None = None,
+    cwd: Path | str | None = None,
     visited: set[Path] | None = None,
 ) -> bool:
     resolved_path = Path(os.path.normpath(str(path.resolve(strict=False))))
@@ -673,10 +675,10 @@ def _shell_file_exposes_command(
 
     next_seen = seen | {resolved_path}
     for token in _iter_shell_source_targets(text):
-        target = _resolve_home_shell_source_target(token, resolved_home)
+        target = _resolve_shell_source_target(token, home=resolved_home, cwd=cwd)
         if target is None:
             continue
-        if _shell_file_exposes_command(target, command_name, home=resolved_home, visited=next_seen):
+        if _shell_file_exposes_command(target, command_name, home=resolved_home, cwd=cwd, visited=next_seen):
             return True
     return False
 
@@ -696,7 +698,13 @@ def _home_relative_shell_path(home: Path, path: Path) -> str:
     return normalized_path.relative_to(normalized_home).as_posix()
 
 
-def _bash_login_startup_chain(home: Path, startup_file: Path, *, seen: frozenset[str] = frozenset()) -> tuple[str, ...]:
+def _bash_login_startup_chain(
+    home: Path,
+    startup_file: Path,
+    *,
+    cwd: Path | str | None = None,
+    seen: frozenset[str] = frozenset(),
+) -> tuple[str, ...]:
     resolved_home = _resolved_home_path(home)
     normalized_startup = Path(
         os.path.normpath(str(startup_file if startup_file.is_absolute() else resolved_home / startup_file))
@@ -710,11 +718,16 @@ def _bash_login_startup_chain(home: Path, startup_file: Path, *, seen: frozenset
         return (name,)
 
     bashrc_path = Path(os.path.normpath(str(resolved_home / ".bashrc")))
-    targets = tuple(
-        resolved
-        for token in _iter_shell_source_targets(text)
-        if (resolved := _resolve_home_shell_source_target(token, resolved_home)) is not None
-    )
+    targets: list[Path] = []
+    for token in _iter_shell_source_targets(text):
+        resolved = _resolve_shell_source_target(token, home=resolved_home, cwd=cwd)
+        if resolved is None:
+            continue
+        try:
+            resolved.relative_to(resolved_home)
+        except ValueError:
+            continue
+        targets.append(resolved)
     if any(target == bashrc_path for target in targets):
         return (name, ".bashrc")
 
@@ -723,33 +736,43 @@ def _bash_login_startup_chain(home: Path, startup_file: Path, *, seen: frozenset
         candidate_name = _home_relative_shell_path(resolved_home, candidate)
         if candidate == bashrc_path or candidate_name in next_seen or not candidate.exists():
             continue
-        chain = _bash_login_startup_chain(resolved_home, candidate, seen=next_seen)
+        chain = _bash_login_startup_chain(resolved_home, candidate, cwd=cwd, seen=next_seen)
         if chain[-1] == ".bashrc":
             return (name, *chain)
 
     return (name,)
 
 
-def bash_login_shell_loads_command(command_name: str, *, home: Path | None = None) -> bool:
+def bash_login_shell_loads_command(
+    command_name: str,
+    *,
+    home: Path | None = None,
+    cwd: Path | str | None = None,
+) -> bool:
     resolved_home = _resolved_home_path(home)
     startup_file = _bash_login_startup_file(resolved_home)
     if startup_file is None:
         return False
-    return _shell_file_exposes_command(startup_file, command_name, home=resolved_home)
+    return _shell_file_exposes_command(startup_file, command_name, home=resolved_home, cwd=cwd)
 
 
-def _shell_command_loads_kimi_from_bash_env(command: str | None, *, home: Path | None = None) -> bool:
-    resolved_home = _shell_command_effective_home_for_target(command, "bash", home=home)
+def _shell_command_loads_kimi_from_bash_env(
+    command: str | None,
+    *,
+    home: Path | None = None,
+    cwd: Path | str | None = None,
+) -> bool:
+    resolved_home = _shell_command_effective_home_for_target(command, "bash", home=home, cwd=cwd)
     bash_env = _shell_command_prefix_env_value_for_target(command, "BASH_ENV", "bash")
     if not bash_env:
         return False
-    path = _resolve_shell_path(bash_env, home=resolved_home)
+    path = _resolve_shell_path(bash_env, home=resolved_home, cwd=cwd)
     text = _read_shell_file_text(path)
     if text is None:
         return False
     if _shell_text_returns_early_for_noninteractive_bash(text):
         return False
-    return _shell_file_exposes_command(path, "kimi", home=resolved_home)
+    return _shell_file_exposes_command(path, "kimi", home=resolved_home, cwd=cwd)
 
 
 def _shell_command_loads_function_from_sourced_file_before_target(
@@ -758,6 +781,7 @@ def _shell_command_loads_function_from_sourced_file_before_target(
     target: str,
     *,
     home: Path | None = None,
+    cwd: Path | str | None = None,
 ) -> bool:
     if not isinstance(command, str) or not command.strip() or not function_name or not target:
         return False
@@ -769,23 +793,24 @@ def _shell_command_loads_function_from_sourced_file_before_target(
     loaded_function = False
     for index, token in enumerate(tokens):
         if active_command in _BASHRC_SOURCE_COMMANDS:
-            target_path = _resolve_shell_path(token, home=home)
-            if _shell_file_exposes_command(target_path, function_name, home=home):
+            target_path = _resolve_shell_source_target(token, home=_resolved_home_path(home), cwd=cwd)
+            if target_path is not None and _shell_file_exposes_command(target_path, function_name, home=home, cwd=cwd):
                 loaded_function = True
 
         if expects_command and _normalize_shell_token(token) == target:
             return loaded_function
 
         if index > 0 and _is_command_flag(tokens[index - 1]) and _shell_command_loads_function_from_sourced_file_before_target(
-            token,
-            function_name,
-            target,
-            home=(
-                _shell_command_effective_home_for_target(command, active_command, home=home)
-                if active_command is not None
-                else home
-            ),
-        ):
+                token,
+                function_name,
+                target,
+                home=(
+                    _shell_command_effective_home_for_target(command, active_command, home=home, cwd=cwd)
+                    if active_command is not None
+                    else home
+                ),
+                cwd=cwd,
+            ):
             return True
 
         if expects_command:
@@ -812,6 +837,7 @@ def _shell_command_loads_env_var_from_sourced_file_before_target(
     target: str,
     *,
     home: Path | None = None,
+    cwd: Path | str | None = None,
 ) -> bool:
     if not isinstance(command, str) or not command.strip() or not env_var or not target:
         return False
@@ -823,23 +849,24 @@ def _shell_command_loads_env_var_from_sourced_file_before_target(
     exported = False
     for index, token in enumerate(tokens):
         if active_command in _BASHRC_SOURCE_COMMANDS:
-            target_path = _resolve_shell_path(token, home=home)
-            if _shell_file_exports_env_var(target_path, env_var, home=home):
+            target_path = _resolve_shell_source_target(token, home=_resolved_home_path(home), cwd=cwd)
+            if target_path is not None and _shell_file_exports_env_var(target_path, env_var, home=home, cwd=cwd):
                 exported = True
 
         if expects_command and _normalize_shell_token(token) == target:
             return exported
 
         if index > 0 and _is_command_flag(tokens[index - 1]) and _shell_command_loads_env_var_from_sourced_file_before_target(
-            token,
-            env_var,
-            target,
-            home=(
-                _shell_command_effective_home_for_target(command, active_command, home=home)
-                if active_command is not None
-                else home
-            ),
-        ):
+                token,
+                env_var,
+                target,
+                home=(
+                    _shell_command_effective_home_for_target(command, active_command, home=home, cwd=cwd)
+                    if active_command is not None
+                    else home
+                ),
+                cwd=cwd,
+            ):
             return True
 
         if expects_command:
@@ -865,6 +892,7 @@ def _shell_command_loads_function_from_sourced_file(
     function_name: str,
     *,
     home: Path | None = None,
+    cwd: Path | str | None = None,
 ) -> bool:
     placeholder = "__AGENTFLOW_SOURCED_FUNCTION_TARGET__"
     return _shell_command_loads_function_from_sourced_file_before_target(
@@ -872,14 +900,31 @@ def _shell_command_loads_function_from_sourced_file(
         function_name,
         placeholder,
         home=home,
+        cwd=cwd,
     )
 
 
-def _shell_command_loads_kimi_from_sourced_file_before_kimi(command: str | None, *, home: Path | None = None) -> bool:
-    return _shell_command_loads_function_from_sourced_file_before_target(command, "kimi", "kimi", home=home)
+def _shell_command_loads_kimi_from_sourced_file_before_kimi(
+    command: str | None,
+    *,
+    home: Path | None = None,
+    cwd: Path | str | None = None,
+) -> bool:
+    return _shell_command_loads_function_from_sourced_file_before_target(
+        command,
+        "kimi",
+        "kimi",
+        home=home,
+        cwd=cwd,
+    )
 
 
-def _shell_template_loads_kimi_from_sourced_file_before_command(shell: str | None, *, home: Path | None = None) -> bool:
+def _shell_template_loads_kimi_from_sourced_file_before_command(
+    shell: str | None,
+    *,
+    home: Path | None = None,
+    cwd: Path | str | None = None,
+) -> bool:
     if not isinstance(shell, str) or "{command}" not in shell:
         return False
     placeholder = "__AGENTFLOW_COMMAND_PLACEHOLDER__"
@@ -888,6 +933,7 @@ def _shell_template_loads_kimi_from_sourced_file_before_command(shell: str | Non
         "kimi",
         placeholder,
         home=home,
+        cwd=cwd,
     )
 
 
@@ -982,19 +1028,30 @@ def shell_init_sources_bashrc_before_kimi(shell_init: Any) -> bool:
     return False
 
 
-def _shell_init_loads_kimi_from_sourced_file_before_kimi(shell_init: Any, *, home: Path | None = None) -> bool:
+def _shell_init_loads_kimi_from_sourced_file_before_kimi(
+    shell_init: Any,
+    *,
+    home: Path | None = None,
+    cwd: Path | str | None = None,
+) -> bool:
     loaded_kimi = False
     for command in shell_init_commands(shell_init):
-        if _shell_command_loads_kimi_from_sourced_file_before_kimi(command, home=home):
+        if _shell_command_loads_kimi_from_sourced_file_before_kimi(command, home=home, cwd=cwd):
             return True
         if shell_command_uses_kimi_helper(command):
             return loaded_kimi
-        if _shell_command_loads_function_from_sourced_file(command, "kimi", home=home):
+        if _shell_command_loads_function_from_sourced_file(command, "kimi", home=home, cwd=cwd):
             loaded_kimi = True
     return False
 
 
-def shell_init_exports_env_var(shell_init: Any, env_var: str, *, home: Path | None = None) -> bool:
+def shell_init_exports_env_var(
+    shell_init: Any,
+    env_var: str,
+    *,
+    home: Path | None = None,
+    cwd: Path | str | None = None,
+) -> bool:
     rendered = render_shell_init(shell_init)
     if not rendered:
         return False
@@ -1005,10 +1062,17 @@ def shell_init_exports_env_var(shell_init: Any, env_var: str, *, home: Path | No
         env_var,
         placeholder,
         home=home,
+        cwd=cwd,
     )
 
 
-def shell_template_exports_env_var_before_command(shell: str | None, env_var: str, *, home: Path | None = None) -> bool:
+def shell_template_exports_env_var_before_command(
+    shell: str | None,
+    env_var: str,
+    *,
+    home: Path | None = None,
+    cwd: Path | str | None = None,
+) -> bool:
     if not isinstance(shell, str) or not shell.strip():
         return False
 
@@ -1028,6 +1092,7 @@ def shell_template_exports_env_var_before_command(shell: str | None, env_var: st
         env_var,
         placeholder,
         home=home,
+        cwd=cwd,
     )
 
 
@@ -1234,17 +1299,24 @@ def target_uses_login_bash(target: Any) -> bool:
     return False
 
 
-def target_bash_home(target: Any, *, home: Path | None = None, env: dict[str, str] | None = None) -> Path:
+def target_bash_home(
+    target: Any,
+    *,
+    home: Path | None = None,
+    env: dict[str, str] | None = None,
+    cwd: Path | str | None = None,
+) -> Path:
     shell = _target_value(target, "shell")
     effective_home = _resolved_home_path(home)
     if isinstance(env, dict):
         env_home = str(env.get("HOME", "")).strip()
         if env_home:
-            effective_home = _resolve_shell_path(env_home, home=effective_home)
+            effective_home = _resolve_shell_path(env_home, home=effective_home, cwd=cwd)
     return _shell_command_effective_home_for_target(
         shell if isinstance(shell, str) else None,
         "bash",
         home=effective_home,
+        cwd=cwd,
     )
 
 
@@ -1254,6 +1326,7 @@ def target_bash_startup_exports_env_var(
     *,
     home: Path | None = None,
     env: dict[str, str] | None = None,
+    cwd: Path | str | None = None,
 ) -> bool:
     if not env_var or not target_uses_bash(target):
         return False
@@ -1263,7 +1336,7 @@ def target_bash_startup_exports_env_var(
     if not (uses_login_bash or uses_interactive_bash):
         return False
 
-    effective_home = target_bash_home(target, home=home, env=env)
+    effective_home = target_bash_home(target, home=home, env=env, cwd=cwd)
     env = os.environ.copy()
     env["HOME"] = str(effective_home)
 
@@ -1279,6 +1352,7 @@ def target_bash_startup_exports_env_var(
             ["bash", bash_flag, f'test -n "${{{env_var}:-}}"'],
             check=False,
             capture_output=True,
+            cwd=str(_resolved_shell_cwd(cwd)),
             env=env,
             text=True,
         )
@@ -1293,11 +1367,12 @@ def target_bash_login_startup_file(
     *,
     home: Path | None = None,
     env: dict[str, str] | None = None,
+    cwd: Path | str | None = None,
 ) -> str | None:
     if not target_uses_login_bash(target):
         return None
 
-    resolved_home = target_bash_home(target, home=home, env=env)
+    resolved_home = target_bash_home(target, home=home, env=env, cwd=cwd)
     startup_file = _bash_login_startup_file(resolved_home)
     if startup_file is None:
         return None
@@ -1310,16 +1385,17 @@ def target_bash_login_startup_chain(
     *,
     home: Path | None = None,
     env: dict[str, str] | None = None,
+    cwd: Path | str | None = None,
 ) -> tuple[str, ...] | None:
     if not target_uses_login_bash(target):
         return None
 
-    resolved_home = target_bash_home(target, home=home, env=env)
+    resolved_home = target_bash_home(target, home=home, env=env, cwd=cwd)
     startup_file = _bash_login_startup_file(resolved_home)
     if startup_file is None:
         return None
 
-    return tuple(f"~/{path}" for path in _bash_login_startup_chain(resolved_home, startup_file))
+    return tuple(f"~/{path}" for path in _bash_login_startup_chain(resolved_home, startup_file, cwd=cwd))
 
 
 def shell_command_uses_kimi_helper(command: str | None) -> bool:
@@ -1423,7 +1499,12 @@ def kimi_shell_init_requires_bash_warning(target: Any) -> str | None:
     return None
 
 
-def kimi_shell_init_requires_interactive_bash_warning(target: Any, *, home: Path | None = None) -> str | None:
+def kimi_shell_init_requires_interactive_bash_warning(
+    target: Any,
+    *,
+    home: Path | None = None,
+    cwd: Path | str | None = None,
+) -> str | None:
     if not target_uses_bash(target):
         return None
     if target_uses_interactive_bash(target):
@@ -1431,9 +1512,18 @@ def kimi_shell_init_requires_interactive_bash_warning(target: Any, *, home: Path
 
     shell_init = _target_value(target, "shell_init")
     shell = _target_value(target, "shell")
-    effective_home = _shell_command_effective_home_for_target(shell if isinstance(shell, str) else None, "bash", home=home)
-    login_shell_loads_kimi = target_uses_login_bash(target) and bash_login_shell_loads_command("kimi", home=effective_home)
-    if _shell_command_loads_kimi_from_bash_env(shell if isinstance(shell, str) else None, home=home):
+    effective_home = _shell_command_effective_home_for_target(
+        shell if isinstance(shell, str) else None,
+        "bash",
+        home=home,
+        cwd=cwd,
+    )
+    login_shell_loads_kimi = target_uses_login_bash(target) and bash_login_shell_loads_command(
+        "kimi",
+        home=effective_home,
+        cwd=cwd,
+    )
+    if _shell_command_loads_kimi_from_bash_env(shell if isinstance(shell, str) else None, home=home, cwd=cwd):
         return None
     guarded_bashrc = bashrc_returns_early_for_noninteractive_shell(effective_home)
     if shell_init_uses_kimi_helper(shell_init):
@@ -1442,9 +1532,10 @@ def kimi_shell_init_requires_interactive_bash_warning(target: Any, *, home: Path
         if _shell_template_loads_kimi_from_sourced_file_before_command(
             shell if isinstance(shell, str) else None,
             home=effective_home,
+            cwd=cwd,
         ):
             return None
-        if _shell_init_loads_kimi_from_sourced_file_before_kimi(shell_init, home=effective_home):
+        if _shell_init_loads_kimi_from_sourced_file_before_kimi(shell_init, home=effective_home, cwd=cwd):
             return None
         if guarded_bashrc:
             if shell_template_sources_bashrc_before_command(shell if isinstance(shell, str) else None):
@@ -1456,7 +1547,7 @@ def kimi_shell_init_requires_interactive_bash_warning(target: Any, *, home: Path
     if shell_command_uses_kimi_helper(shell if isinstance(shell, str) else None):
         if login_shell_loads_kimi:
             return None
-        if _shell_command_loads_kimi_from_sourced_file_before_kimi(shell, home=effective_home):
+        if _shell_command_loads_kimi_from_sourced_file_before_kimi(shell, home=effective_home, cwd=cwd):
             return None
         if guarded_bashrc and shell_command_sources_bashrc_before_kimi(shell):
             return _explicit_bashrc_kimi_warning("target.shell")

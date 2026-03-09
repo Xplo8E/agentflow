@@ -260,7 +260,13 @@ def _bash_startup_auth_source_label(target: object) -> tuple[str, str] | None:
     return None
 
 
-def _auth_summary(node: NodeSpec, resolved_provider: object, launch_env: dict[str, str] | None = None) -> str | None:
+def _auth_summary(
+    node: NodeSpec,
+    resolved_provider: object,
+    launch_env: dict[str, str] | None = None,
+    *,
+    cwd: str | None = None,
+) -> str | None:
     api_key_env, provider_name = _resolved_auth_requirement(node)
     if not api_key_env:
         return None
@@ -273,9 +279,9 @@ def _auth_summary(node: NodeSpec, resolved_provider: object, launch_env: dict[st
         api_key_env == "ANTHROPIC_API_KEY" and provider_uses_kimi_anthropic_auth(resolved_provider)
     )
     if getattr(target, "kind", None) == "local":
-        effective_home = target_bash_home(target, env=launch_env)
+        effective_home = target_bash_home(target, env=launch_env, cwd=cwd)
         shell_init = getattr(target, "shell_init", None)
-        if shell_init_exports_env_var(shell_init, api_key_env, home=effective_home):
+        if shell_init_exports_env_var(shell_init, api_key_env, home=effective_home, cwd=cwd):
             explicit_bootstrap_source = ("`target.shell_init`", "target.shell_init")
 
         shell = getattr(target, "shell", None)
@@ -284,6 +290,7 @@ def _auth_summary(node: NodeSpec, resolved_provider: object, launch_env: dict[st
                 shell if isinstance(shell, str) else None,
                 api_key_env,
                 home=effective_home,
+                cwd=cwd,
             )
             or shell_command_prefixes_env_var(shell if isinstance(shell, str) else None, api_key_env)
         ):
@@ -297,6 +304,7 @@ def _auth_summary(node: NodeSpec, resolved_provider: object, launch_env: dict[st
             api_key_env,
             home=effective_home,
             env=launch_env,
+            cwd=cwd,
         ):
             bash_startup_source = _bash_startup_auth_source_label(target)
 
@@ -347,7 +355,12 @@ def _auth_summary(node: NodeSpec, resolved_provider: object, launch_env: dict[st
     return f"expects `{api_key_env}` via {', '.join(expectation_sources[:-1])}, or {expectation_sources[-1]}"
 
 
-def _bootstrap_summary(target: dict[str, Any], launch_env: dict[str, str] | None = None) -> str | None:
+def _bootstrap_summary(
+    target: dict[str, Any],
+    launch_env: dict[str, str] | None = None,
+    *,
+    cwd: str | None = None,
+) -> str | None:
     if target.get("kind") != "local":
         return None
 
@@ -364,7 +377,7 @@ def _bootstrap_summary(target: dict[str, Any], launch_env: dict[str, str] | None
     if uses_login_bash:
         parts.append("login=true")
 
-    login_startup_chain = target_bash_login_startup_chain(target, env=launch_env)
+    login_startup_chain = target_bash_login_startup_chain(target, env=launch_env, cwd=cwd)
     if login_startup_chain:
         parts.append(f"startup={' -> '.join(login_startup_chain)}")
     elif uses_login_bash:
@@ -382,12 +395,17 @@ def _bootstrap_summary(target: dict[str, Any], launch_env: dict[str, str] | None
     return ", ".join(parts)
 
 
-def _target_warnings(target: dict[str, Any], launch_env: dict[str, str] | None = None) -> list[str]:
+def _target_warnings(
+    target: dict[str, Any],
+    launch_env: dict[str, str] | None = None,
+    *,
+    cwd: str | None = None,
+) -> list[str]:
     warnings: list[str] = []
 
-    effective_home = target_bash_home(target, env=launch_env)
+    effective_home = target_bash_home(target, env=launch_env, cwd=cwd)
 
-    if target_uses_login_bash(target) and target_bash_login_startup_file(target, env=launch_env) is None:
+    if target_uses_login_bash(target) and target_bash_login_startup_file(target, env=launch_env, cwd=cwd) is None:
         warnings.append(
             "Bash login startup will not load any user file from `HOME` because `~/.bash_profile`, "
             "`~/.bash_login`, and `~/.profile` are all missing."
@@ -397,7 +415,7 @@ def _target_warnings(target: dict[str, Any], launch_env: dict[str, str] | None =
     if kimi_bash_warning:
         warnings.append(kimi_bash_warning)
 
-    kimi_warning = kimi_shell_init_requires_interactive_bash_warning(target, home=effective_home)
+    kimi_warning = kimi_shell_init_requires_interactive_bash_warning(target, home=effective_home, cwd=cwd)
     if kimi_warning:
         warnings.append(kimi_warning)
 
@@ -534,13 +552,14 @@ def _local_bootstrap_sets_env_var(
     env_var: str,
     *,
     env: dict[str, str] | None = None,
+    cwd: str | None = None,
 ) -> bool:
     if getattr(target, "kind", None) != "local":
         return False
 
-    effective_home = target_bash_home(target, env=env)
+    effective_home = target_bash_home(target, env=env, cwd=cwd)
     shell_init = getattr(target, "shell_init", None)
-    if shell_init_exports_env_var(shell_init, env_var, home=effective_home):
+    if shell_init_exports_env_var(shell_init, env_var, home=effective_home, cwd=cwd):
         return True
 
     shell = getattr(target, "shell", None)
@@ -548,12 +567,13 @@ def _local_bootstrap_sets_env_var(
         shell if isinstance(shell, str) else None,
         env_var,
         home=effective_home,
+        cwd=cwd,
     ):
         return True
     if shell_command_prefixes_env_var(shell if isinstance(shell, str) else None, env_var):
         return True
 
-    if target_bash_startup_exports_env_var(target, env_var, home=effective_home, env=env):
+    if target_bash_startup_exports_env_var(target, env_var, home=effective_home, env=env, cwd=cwd):
         return True
 
     return env_var == "ANTHROPIC_BASE_URL" and _kimi_helper_bootstrap_source(target) is not None
@@ -573,6 +593,8 @@ def _launch_env_inheritance_details(
     node: NodeSpec,
     resolved_provider: Any,
     launch_env: dict[str, str],
+    *,
+    cwd: str | None = None,
 ) -> list[dict[str, Any]]:
     key = _ambient_base_url_env_key(node)
     if key is None:
@@ -585,7 +607,7 @@ def _launch_env_inheritance_details(
     if key in launch_env:
         return []
 
-    if _local_bootstrap_sets_env_var(node.target, key, env=launch_env):
+    if _local_bootstrap_sets_env_var(node.target, key, env=launch_env, cwd=cwd):
         return []
 
     return [{"key": key, "current_value": current_value, "source": "current environment"}]
@@ -595,10 +617,12 @@ def _launch_env_inheritance_warnings(
     node: NodeSpec,
     resolved_provider: Any,
     launch_env: dict[str, str],
+    *,
+    cwd: str | None = None,
 ) -> list[str]:
     return [
         _format_launch_env_inheritance_detail(node, detail)
-        for detail in _launch_env_inheritance_details(node, resolved_provider, launch_env)
+        for detail in _launch_env_inheritance_details(node, resolved_provider, launch_env, cwd=cwd)
     ]
 
 
@@ -699,22 +723,27 @@ def build_launch_inspection(
             },
         }
         launch_env = _local_launch_env(node, resolved_provider)
-        auth_summary = _auth_summary(node, resolved_provider, launch_env)
+        auth_summary = _auth_summary(node, resolved_provider, launch_env, cwd=prepared.cwd)
         if auth_summary:
             node_plan["auth"] = auth_summary
-        bootstrap_summary = _bootstrap_summary(node_plan["target"], prepared.env)
+        bootstrap_summary = _bootstrap_summary(node_plan["target"], prepared.env, cwd=prepared.cwd)
         if bootstrap_summary:
             node_plan["bootstrap"] = bootstrap_summary
         launch_env_overrides = _launch_env_override_details(node, resolved_provider, prepared.env)
         if launch_env_overrides:
             node_plan["launch_env_overrides"] = launch_env_overrides
-        launch_env_inheritances = _launch_env_inheritance_details(node, resolved_provider, prepared.env)
+        launch_env_inheritances = _launch_env_inheritance_details(
+            node,
+            resolved_provider,
+            prepared.env,
+            cwd=prepared.cwd,
+        )
         if launch_env_inheritances:
             node_plan["launch_env_inheritances"] = launch_env_inheritances
         node_plan["warnings"] = (
-            _target_warnings(node_plan["target"], prepared.env)
+            _target_warnings(node_plan["target"], prepared.env, cwd=prepared.cwd)
             + _launch_env_override_warnings(node, resolved_provider, prepared.env)
-            + _launch_env_inheritance_warnings(node, resolved_provider, prepared.env)
+            + _launch_env_inheritance_warnings(node, resolved_provider, prepared.env, cwd=prepared.cwd)
         )
         node_plan["launch"]["payload_summary"] = _payload_summary(node_plan)
         inspected_nodes.append(node_plan)

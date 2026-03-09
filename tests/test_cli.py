@@ -1143,6 +1143,40 @@ nodes:
     assert payload["nodes"][0]["auth"] == "`ANTHROPIC_API_KEY` via local bash login startup files"
 
 
+def test_inspect_command_summary_uses_target_cwd_for_relative_login_startup_sources(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f .bashrc ]; then . .bashrc; fi\n', encoding="utf-8")
+    (home / ".bashrc").write_text("export ANTHROPIC_API_KEY=from-relative-bashrc\n", encoding="utf-8")
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        f"""name: inspect-claude-relative-login-startup
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    provider: anthropic
+    prompt: hi
+    target:
+      kind: local
+      shell: bash
+      shell_login: true
+      cwd: {home}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path), "--output", "json-summary"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["nodes"][0]["auth"] == "`ANTHROPIC_API_KEY` via local bash login startup files"
+    assert payload["nodes"][0]["bootstrap"] == "shell=bash, login=true, startup=~/.profile -> ~/.bashrc"
+    assert payload["nodes"][0]["cwd"] == str(home.resolve())
+
+
 def test_inspect_command_summary_treats_custom_kimi_provider_shell_bootstrap_as_auth_source(tmp_path, monkeypatch):
     pipeline_path = tmp_path / "pipeline.yaml"
     pipeline_path.write_text(
@@ -5190,6 +5224,43 @@ def test_doctor_with_pipeline_path_accepts_provider_credentials_from_login_shell
 
     assert result.exit_code == 0
     assert captured["loaded_path"] == "custom-smoke.yaml"
+    assert result.stdout == (
+        "Doctor: ok\n"
+        "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
+    )
+
+
+def test_doctor_with_pipeline_path_uses_target_cwd_for_relative_login_startup_sources(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f .bashrc ]; then . .bashrc; fi\n', encoding="utf-8")
+    (home / ".bashrc").write_text("export ANTHROPIC_API_KEY=from-relative-bashrc\n", encoding="utf-8")
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        f"""name: doctor-relative-login-startup
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    provider: anthropic
+    prompt: hi
+    target:
+      kind: local
+      shell: bash
+      shell_login: true
+      cwd: {home}
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    result = runner.invoke(app, ["doctor", str(pipeline_path), "--output", "summary"])
+
+    assert result.exit_code == 0
+    assert "provider_credentials" not in result.stdout
     assert result.stdout == (
         "Doctor: ok\n"
         "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"

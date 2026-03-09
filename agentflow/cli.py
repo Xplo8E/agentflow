@@ -39,6 +39,7 @@ from agentflow.local_shell import (
     target_uses_interactive_bash,
     target_uses_login_bash,
 )
+from agentflow.prepared import resolve_local_workdir
 from agentflow.specs import AgentKind, LocalTarget, provider_uses_kimi_anthropic_auth, resolve_provider
 
 app = typer.Typer(add_completion=False)
@@ -649,7 +650,8 @@ def _node_kimi_shell_bootstrap_check(node: object) -> DoctorCheck | None:
     if agent in {member.value for member in AgentKind}:
         provider = resolve_provider(getattr(node, "provider", None), AgentKind(agent))
     launch_env = merge_env_layers(getattr(provider, "env", None), getattr(node, "env", None))
-    effective_home = target_bash_home(target, env=launch_env)
+    launch_cwd = _local_target_launch_cwd(node)
+    effective_home = target_bash_home(target, env=launch_env, cwd=launch_cwd)
 
     bash_warning = kimi_shell_init_requires_bash_warning(target)
     if bash_warning is not None:
@@ -659,7 +661,11 @@ def _node_kimi_shell_bootstrap_check(node: object) -> DoctorCheck | None:
             detail=f"Node `{node_id}`: {bash_warning}",
         )
 
-    interactive_warning = kimi_shell_init_requires_interactive_bash_warning(target, home=effective_home)
+    interactive_warning = kimi_shell_init_requires_interactive_bash_warning(
+        target,
+        home=effective_home,
+        cwd=launch_cwd,
+    )
     if interactive_warning is not None:
         return DoctorCheck(
             name="kimi_shell_bootstrap",
@@ -761,6 +767,18 @@ def _coerce_local_target(target: object) -> LocalTarget | None:
     return LocalTarget.model_validate(payload)
 
 
+def _local_target_launch_cwd(node: object, pipeline: object | None = None) -> Path | None:
+    target = _coerce_local_target(getattr(node, "target", None))
+    if target is None:
+        return None
+
+    working_path = getattr(node, "working_path", None)
+    if working_path is None and pipeline is not None:
+        working_path = getattr(pipeline, "working_path", None)
+    pipeline_workdir = Path(str(working_path or Path.cwd())).expanduser().resolve()
+    return resolve_local_workdir(pipeline_workdir, target.cwd)
+
+
 def _resolved_provider_api_key_env(node: object) -> tuple[str | None, str | None]:
     agent = _status_value(getattr(node, "agent", None)).lower()
     if agent not in {member.value for member in AgentKind}:
@@ -779,13 +797,15 @@ def _provider_credentials_come_from_local_bootstrap(
     *,
     api_key_env: str,
     provider: object | None,
+    pipeline: object | None = None,
 ) -> bool:
     target = _coerce_local_target(getattr(node, "target", None))
     if target is not None:
         launch_env = merge_env_layers(getattr(provider, "env", None), getattr(node, "env", None))
-        effective_home = target_bash_home(target, env=launch_env)
+        launch_cwd = _local_target_launch_cwd(node, pipeline)
+        effective_home = target_bash_home(target, env=launch_env, cwd=launch_cwd)
         shell_init = getattr(target, "shell_init", None)
-        if shell_init_exports_env_var(shell_init, api_key_env, home=effective_home):
+        if shell_init_exports_env_var(shell_init, api_key_env, home=effective_home, cwd=launch_cwd):
             return True
 
         shell = getattr(target, "shell", None)
@@ -793,11 +813,18 @@ def _provider_credentials_come_from_local_bootstrap(
             shell if isinstance(shell, str) else None,
             api_key_env,
             home=effective_home,
+            cwd=launch_cwd,
         ):
             return True
         if shell_command_prefixes_env_var(shell if isinstance(shell, str) else None, api_key_env):
             return True
-        if target_bash_startup_exports_env_var(target, api_key_env, home=effective_home, env=launch_env):
+        if target_bash_startup_exports_env_var(
+            target,
+            api_key_env,
+            home=effective_home,
+            env=launch_env,
+            cwd=launch_cwd,
+        ):
             return True
 
     if api_key_env == "ANTHROPIC_API_KEY" and provider_uses_kimi_anthropic_auth(provider):
@@ -824,6 +851,7 @@ def _pipeline_provider_credential_checks(pipeline: object) -> list[DoctorCheck]:
             node,
             api_key_env=api_key_env,
             provider=provider,
+            pipeline=pipeline,
         ):
             has_key = True
         if has_key:
