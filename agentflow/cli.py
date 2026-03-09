@@ -699,7 +699,15 @@ def _doctor_report_for_path(path: str | None = None) -> tuple[object, dict[str, 
             pipeline = _load_pipeline(default_smoke_pipeline_path())
         except typer.Exit:
             return report, None, None
-        return _augment_preflight_report(report, pipeline), None, pipeline
+        return (
+            _augment_preflight_report(
+                report,
+                pipeline,
+                include_ok_local_checks=_include_ok_local_preflight_checks(default_smoke_pipeline_path(), pipeline),
+            ),
+            None,
+            pipeline,
+        )
     pipeline = _load_pipeline(path)
     report = _preflight_base_report(path, pipeline)
     include_ok_local_checks = _include_ok_local_preflight_checks(path, pipeline)
@@ -1264,7 +1272,7 @@ def _auto_smoke_preflight_metadata(path: str, pipeline: object) -> dict[str, obj
 
 
 def _include_ok_local_preflight_checks(path: str, pipeline: object) -> bool:
-    return not _path_matches_bundled_smoke(path) and _pipeline_uses_auto_preflight(pipeline)
+    return _path_matches_bundled_smoke(path) or _pipeline_uses_auto_preflight(pipeline)
 
 
 def _should_run_smoke_preflight(
@@ -1318,7 +1326,11 @@ def _load_pipeline_with_optional_smoke_preflight(
             report = _doctor_report()
         if pipeline is None and selected_path_matches_bundled and _status_value(getattr(report, "status", "ok")) != "failed":
             preflight_pipeline = _load_pipeline(selected_path)
-            report = _augment_preflight_report(report, preflight_pipeline)
+            report = _augment_preflight_report(
+                report,
+                preflight_pipeline,
+                include_ok_local_checks=_include_ok_local_preflight_checks(path or selected_path, preflight_pipeline),
+            )
         doctor_output = _structured_output_from_run_output(output)
         shell_bridge = _preflight_shell_bridge_recommendation(report, pipeline=preflight_pipeline)
         include_shell_bridge = shell_bridge is not None
