@@ -519,12 +519,12 @@ def _launch_env_override_warnings(
     ]
 
 
-def _ambient_base_url_env_key(node: NodeSpec, resolved_provider: Any) -> str | None:
+def _ambient_base_url_env_key(node: NodeSpec) -> str | None:
     if getattr(node.target, "kind", "local") != "local":
         return None
-    if node.agent == AgentKind.CODEX and resolved_provider is None:
+    if node.agent == AgentKind.CODEX:
         return "OPENAI_BASE_URL"
-    if node.agent == AgentKind.CLAUDE and resolved_provider is None:
+    if node.agent == AgentKind.CLAUDE:
         return "ANTHROPIC_BASE_URL"
     return None
 
@@ -574,7 +574,7 @@ def _launch_env_inheritance_details(
     resolved_provider: Any,
     launch_env: dict[str, str],
 ) -> list[dict[str, Any]]:
-    key = _ambient_base_url_env_key(node, resolved_provider)
+    key = _ambient_base_url_env_key(node)
     if key is None:
         return []
 

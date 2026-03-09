@@ -707,6 +707,75 @@ nodes:
     ]
 
 
+def test_inspect_command_summary_warns_when_explicit_claude_provider_leaves_base_url_inherited(tmp_path, monkeypatch):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-explicit-claude-provider-base-url-inheritance
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    provider:
+      name: anthropic
+      api_key_env: ANTHROPIC_API_KEY
+    prompt: hi
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "super-secret")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://open.bigmodel.cn/api/anthropic")
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path), "--output", "json-summary"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["nodes"][0]["launch_env_inheritances"] == [
+        {
+            "key": "ANTHROPIC_BASE_URL",
+            "current_value": "https://open.bigmodel.cn/api/anthropic",
+            "source": "current environment",
+        }
+    ]
+    assert payload["nodes"][0]["warnings"] == [
+        "Launch inherits current `ANTHROPIC_BASE_URL` value `https://open.bigmodel.cn/api/anthropic`; configure `provider` or `node.env` explicitly if you want Claude routing pinned for this node."
+    ]
+
+
+def test_inspect_command_summary_warns_when_explicit_codex_provider_leaves_base_url_inherited(tmp_path, monkeypatch):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-explicit-codex-provider-base-url-inheritance
+working_dir: .
+nodes:
+  - id: plan
+    agent: codex
+    provider:
+      name: openai
+      api_key_env: OPENAI_API_KEY
+      wire_api: responses
+    prompt: hi
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "super-secret")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://oai-relay.ctf.so/openai")
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path), "--output", "json-summary"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["nodes"][0]["launch_env_inheritances"] == [
+        {
+            "key": "OPENAI_BASE_URL",
+            "current_value": "https://oai-relay.ctf.so/openai",
+            "source": "current environment",
+        }
+    ]
+    assert payload["nodes"][0]["warnings"] == [
+        "Launch inherits current `OPENAI_BASE_URL` value `https://oai-relay.ctf.so/openai`; configure `provider` or `node.env` explicitly if you want Codex routing pinned for this node."
+    ]
+
+
 def test_inspect_command_summary_uses_node_home_for_base_url_bootstrap_detection(tmp_path, monkeypatch):
     launch_home = tmp_path / "launch-home"
     launch_home.mkdir()
@@ -5583,6 +5652,66 @@ nodes:
     assert result.stdout == (
         "Doctor: warning\n"
         "- launch_env_inheritance: warning - Node `review`: Launch inherits current `ANTHROPIC_BASE_URL` value `https://open.bigmodel.cn/api/anthropic`; configure `provider` or `node.env` explicitly if you want Claude routing pinned for this node.\n"
+        "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
+    )
+
+
+def test_doctor_with_pipeline_path_warns_when_explicit_claude_provider_leaves_base_url_inherited(tmp_path, monkeypatch):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: doctor-explicit-claude-provider-base-url-inheritance
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    provider:
+      name: anthropic
+      api_key_env: ANTHROPIC_API_KEY
+    prompt: hi
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(agentflow.cli, "build_pipeline_local_claude_readiness_checks", lambda pipeline: [])
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "super-secret")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://open.bigmodel.cn/api/anthropic")
+
+    result = runner.invoke(app, ["doctor", str(pipeline_path), "--output", "summary"])
+
+    assert result.exit_code == 0
+    assert result.stdout == (
+        "Doctor: warning\n"
+        "- launch_env_inheritance: warning - Node `review`: Launch inherits current `ANTHROPIC_BASE_URL` value `https://open.bigmodel.cn/api/anthropic`; configure `provider` or `node.env` explicitly if you want Claude routing pinned for this node.\n"
+        "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
+    )
+
+
+def test_doctor_with_pipeline_path_warns_when_explicit_codex_provider_leaves_base_url_inherited(tmp_path, monkeypatch):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: doctor-explicit-codex-provider-base-url-inheritance
+working_dir: .
+nodes:
+  - id: plan
+    agent: codex
+    provider:
+      name: openai
+      api_key_env: OPENAI_API_KEY
+      wire_api: responses
+    prompt: hi
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(agentflow.cli, "build_pipeline_local_codex_readiness_checks", lambda pipeline: [])
+    monkeypatch.setattr(agentflow.cli, "build_pipeline_local_codex_auth_checks", lambda pipeline: [])
+    monkeypatch.setenv("OPENAI_API_KEY", "super-secret")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://oai-relay.ctf.so/openai")
+
+    result = runner.invoke(app, ["doctor", str(pipeline_path), "--output", "summary"])
+
+    assert result.exit_code == 0
+    assert result.stdout == (
+        "Doctor: warning\n"
+        "- launch_env_inheritance: warning - Node `plan`: Launch inherits current `OPENAI_BASE_URL` value `https://oai-relay.ctf.so/openai`; configure `provider` or `node.env` explicitly if you want Codex routing pinned for this node.\n"
         "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
     )
 
