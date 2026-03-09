@@ -175,6 +175,57 @@ def _env_assignment_name(token: str) -> str | None:
     return normalized.split("=", 1)[0]
 
 
+def _shell_token_matches_target(token: str, target: str) -> bool:
+    normalized = _normalize_shell_token(token)
+    if not normalized or not target:
+        return False
+    if normalized == target:
+        return True
+    if "/" in target:
+        return False
+    return os.path.basename(normalized) == target
+
+
+def _shell_command_prefix_env_for_target(command: str | None, target: str) -> dict[str, str]:
+    if not isinstance(command, str) or not command.strip() or not target:
+        return {}
+
+    tokens = _split_shell_parts(command)
+    expects_command = True
+    prefix_allows_options = False
+    assigned_values: dict[str, str] = {}
+
+    for index, token in enumerate(tokens):
+        if index > 0 and _is_command_flag(tokens[index - 1]):
+            nested = _shell_command_prefix_env_for_target(token, target)
+            if nested:
+                return nested
+
+        normalized = _normalize_shell_token(token)
+        if _token_resets_command_position(token):
+            expects_command = True
+            prefix_allows_options = False
+            assigned_values = {}
+            continue
+
+        if expects_command:
+            if _shell_token_matches_target(token, target):
+                return dict(assigned_values)
+            if token in _COMMAND_POSITION_PREFIX_TOKENS:
+                prefix_allows_options = True
+                continue
+            if _looks_like_env_assignment(token):
+                name, value = normalized.split("=", 1)
+                assigned_values[name] = value
+                continue
+            if prefix_allows_options and (token == "--" or token.startswith("-")):
+                continue
+            expects_command = False
+            prefix_allows_options = False
+
+    return {}
+
+
 def _shell_command_exports_env_var_before_target(command: str | None, env_var: str, target: str) -> bool:
     if not isinstance(command, str) or not command.strip() or not env_var or not target:
         return False
@@ -250,36 +301,35 @@ def _shell_command_exports_env_var_before_target(command: str | None, env_var: s
 
 
 def _shell_command_prefix_env_value_for_target(command: str | None, env_var: str, target: str) -> str | None:
-    if not isinstance(command, str) or not command.strip() or not env_var or not target:
+    return _shell_command_prefix_env_for_target(command, target).get(env_var)
+
+
+def _shell_command_program_for_target(command: str | None, target: str) -> str | None:
+    if not isinstance(command, str) or not command.strip() or not target:
         return None
 
     tokens = _split_shell_parts(command)
     expects_command = True
     prefix_allows_options = False
-    assigned_values: dict[str, str] = {}
 
     for index, token in enumerate(tokens):
         if index > 0 and _is_command_flag(tokens[index - 1]):
-            nested = _shell_command_prefix_env_value_for_target(token, env_var, target)
+            nested = _shell_command_program_for_target(token, target)
             if nested is not None:
                 return nested
 
-        normalized = _normalize_shell_token(token)
         if _token_resets_command_position(token):
             expects_command = True
             prefix_allows_options = False
-            assigned_values = {}
             continue
 
         if expects_command:
-            if normalized == target:
-                return assigned_values.get(env_var)
+            if _shell_token_matches_target(token, target):
+                return _normalize_shell_token(token)
             if token in _COMMAND_POSITION_PREFIX_TOKENS:
                 prefix_allows_options = True
                 continue
             if _looks_like_env_assignment(token):
-                name, value = normalized.split("=", 1)
-                assigned_values[name] = value
                 continue
             if prefix_allows_options and (token == "--" or token.startswith("-")):
                 continue
@@ -1568,6 +1618,9 @@ def probe_target_bash_startup_env_var(
         return BashStartupEnvProbeResult(exported=False)
 
     effective_home = target_bash_home(target, home=home, env=env, cwd=cwd)
+    shell = _target_value(target, "shell")
+    bash_shell = shell if isinstance(shell, str) else None
+    shell_env = _shell_command_prefix_env_for_target(bash_shell, "bash")
     launch_env = os.environ.copy()
     if isinstance(env, dict):
         for key, value in env.items():
@@ -1576,6 +1629,7 @@ def probe_target_bash_startup_env_var(
                 launch_env.pop(key_text, None)
                 continue
             launch_env[key_text] = str(value)
+    launch_env.update(shell_env)
     launch_env["HOME"] = str(effective_home)
     launch_env.pop(env_var, None)
 
@@ -1588,7 +1642,7 @@ def probe_target_bash_startup_env_var(
 
     try:
         result = subprocess.run(
-            ["bash", bash_flag, f'test -n "${{{env_var}:-}}"'],
+            [_shell_command_program_for_target(bash_shell, "bash") or "bash", bash_flag, f'test -n "${{{env_var}:-}}"'],
             check=False,
             capture_output=True,
             cwd=str(_resolved_shell_cwd(cwd)),
