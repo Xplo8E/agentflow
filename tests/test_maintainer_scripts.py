@@ -283,10 +283,15 @@ def test_verify_local_kimi_stack_script_runs_steps_in_expected_order(tmp_path: P
         timeout=5,
     )
 
+    bundled_smoke_pipeline = tmp_path / "examples" / "local-real-agents-kimi-smoke.yaml"
+
     assert completed.returncode == 0
     assert completed.stderr == ""
     assert log_path.read_text(encoding="utf-8").splitlines() == [
         "verify-local-kimi-shell.sh mode=",
+        "agentflow:toolchain-local --output summary",
+        f"agentflow:inspect {bundled_smoke_pipeline} --output summary",
+        f"agentflow:doctor {bundled_smoke_pipeline} --output summary",
         "verify-custom-local-kimi-doctor.sh mode=",
         "verify-custom-local-kimi-doctor.sh mode=shell-init",
         "verify-custom-local-kimi-doctor.sh mode=shell-wrapper",
@@ -301,7 +306,10 @@ def test_verify_local_kimi_stack_script_runs_steps_in_expected_order(tmp_path: P
         "verify-custom-local-kimi-run.sh mode=shell-init",
         "verify-custom-local-kimi-run.sh mode=shell-wrapper",
     ]
-    assert completed.stdout.count("== ") == 14
+    assert completed.stdout.count("== ") == 17
     assert "== Shell toolchain ==" in completed.stdout
+    assert "== Bundled toolchain-local ==" in completed.stdout
+    assert "== Bundled inspect-local ==" in completed.stdout
+    assert "== Bundled doctor-local ==" in completed.stdout
     assert "== Bundled check-local ==" in completed.stdout
     assert "== External custom run (target.shell) ==" in completed.stdout
