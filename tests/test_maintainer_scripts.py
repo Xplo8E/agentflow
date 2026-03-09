@@ -328,6 +328,65 @@ def test_verify_local_kimi_shell_script_requires_kimi_to_export_anthropic_env(tm
     assert "kimi did not export ANTHROPIC_API_KEY" in completed.stderr
 
 
+def test_verify_local_kimi_shell_script_fails_when_codex_version_fails(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    _write_fake_shell_home(
+        home,
+        kimi_body=(
+            "export ANTHROPIC_BASE_URL=https://api.kimi.com/coding/\n"
+            "export ANTHROPIC_API_KEY=test-kimi-key\n"
+        ),
+    )
+    _write_executable(
+        home / "bin" / "codex",
+        'if [ "${1:-}" = "login" ] && [ "${2:-}" = "status" ]; then\n'
+        "  exit 0\n"
+        "fi\n"
+        'if [ "${1:-}" = "--version" ]; then\n'
+        '  printf "codex-cli broken\\n"\n'
+        "  exit 7\n"
+        "fi\n",
+    )
+
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "verify-local-kimi-shell.sh"
+
+    completed = _run_script(script_path, repo_root=repo_root, home=home, OPENAI_API_KEY="")
+
+    assert completed.returncode == 7
+    assert "~/.profile: present" in completed.stdout
+    assert "codex-cli broken" in completed.stderr
+
+
+def test_verify_local_kimi_shell_script_fails_when_claude_version_fails(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    _write_fake_shell_home(
+        home,
+        kimi_body=(
+            "export ANTHROPIC_BASE_URL=https://api.kimi.com/coding/\n"
+            "export ANTHROPIC_API_KEY=test-kimi-key\n"
+        ),
+    )
+    _write_executable(
+        home / "bin" / "claude",
+        'if [ "${1:-}" = "--version" ]; then\n'
+        '  printf "Claude Code broken\\n"\n'
+        "  exit 9\n"
+        "fi\n",
+    )
+
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "verify-local-kimi-shell.sh"
+
+    completed = _run_script(script_path, repo_root=repo_root, home=home, OPENAI_API_KEY="")
+
+    assert completed.returncode == 9
+    assert "~/.profile: present" in completed.stdout
+    assert "Claude Code broken" in completed.stderr
+
+
 def test_verify_custom_local_kimi_shell_init_wrapper_forces_shell_init_mode(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     scripts_dir = tmp_path / "scripts"

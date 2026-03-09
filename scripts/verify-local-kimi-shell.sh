@@ -63,6 +63,20 @@ printf "bash login startup: %s\n" "$bash_login_startup"
 printf "%s\n" "$bash_login_bridge_summary"
 
 agentflow_run_with_timeout "$python_bin" env EXPECTED_ANTHROPIC_BASE_URL="$expected_anthropic_base_url" bash -lic '
+set -euo pipefail
+first_line_or_fail() {
+  local output
+  local status
+
+  output="$("$@" 2>&1)" || {
+    status=$?
+    printf "%s\n" "$output" >&2
+    exit "$status"
+  }
+
+  printf "%s\n" "${output%%$'\''\n'\''*}"
+}
+
 command -v kimi >/dev/null 2>&1
 kimi_kind="$(type -t kimi 2>/dev/null || true)"
 kimi_path="$(type -P kimi 2>/dev/null || true)"
@@ -107,8 +121,8 @@ done
 printf "codex auth: %s\n" "$codex_auth_label"
 codex_path="$(command -v codex)"
 claude_path="$(command -v claude)"
-codex_version="$(codex --version 2>&1 | head -n 1)"
-claude_version="$(claude --version 2>&1 | head -n 1)"
+codex_version="$(first_line_or_fail codex --version)"
+claude_version="$(first_line_or_fail claude --version)"
 printf "codex: %s (%s)\n" "$codex_path" "$codex_version"
 printf "claude: %s (%s)\n" "$claude_path" "$claude_version"
 ' 2> >(
