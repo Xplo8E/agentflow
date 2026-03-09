@@ -628,19 +628,23 @@ def _provider_credentials_come_from_local_bootstrap(
 ) -> bool:
     target = _coerce_local_target(getattr(node, "target", None))
     if target is not None:
+        effective_home = target_bash_home(target)
         shell_init = getattr(target, "shell_init", None)
-        if shell_init_exports_env_var(shell_init, api_key_env):
+        if shell_init_exports_env_var(shell_init, api_key_env, home=effective_home):
             return True
 
         shell = getattr(target, "shell", None)
-        if shell_template_exports_env_var_before_command(shell if isinstance(shell, str) else None, api_key_env):
+        if shell_template_exports_env_var_before_command(
+            shell if isinstance(shell, str) else None,
+            api_key_env,
+            home=effective_home,
+        ):
             return True
         if shell_command_prefixes_env_var(shell if isinstance(shell, str) else None, api_key_env):
             return True
         uses_login_bash = target_uses_login_bash(target)
         uses_interactive_bash = target_uses_interactive_bash(target)
         if uses_login_bash or uses_interactive_bash:
-            effective_home = target_bash_home(target)
             env = os.environ.copy()
             env["HOME"] = str(effective_home)
             bash_flag = "-"

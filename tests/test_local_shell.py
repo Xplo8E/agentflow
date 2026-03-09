@@ -452,10 +452,47 @@ def test_shell_init_exports_env_var_detects_split_assignment_then_export():
     )
 
 
+def test_shell_init_exports_env_var_detects_export_from_sourced_file(tmp_path: Path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".anthropic.env").write_text("export ANTHROPIC_API_KEY=test-shell-key\n", encoding="utf-8")
+
+    assert shell_init_exports_env_var(["source ~/.anthropic.env"], "ANTHROPIC_API_KEY", home=home) is True
+
+
 def test_shell_template_exports_env_var_before_command_detects_nested_export():
     assert (
         shell_template_exports_env_var_before_command(
             "bash -lc 'export ANTHROPIC_API_KEY=test-shell-key && {command}'",
+            "ANTHROPIC_API_KEY",
+        )
+        is True
+    )
+
+
+def test_shell_template_exports_env_var_before_command_detects_sourced_file(tmp_path: Path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".anthropic.env").write_text("export ANTHROPIC_API_KEY=test-shell-key\n", encoding="utf-8")
+
+    assert (
+        shell_template_exports_env_var_before_command(
+            "bash -lc 'source ~/.anthropic.env && {command}'",
+            "ANTHROPIC_API_KEY",
+            home=home,
+        )
+        is True
+    )
+
+
+def test_shell_template_exports_env_var_before_command_respects_prefixed_home_override(tmp_path: Path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".anthropic.env").write_text("export ANTHROPIC_API_KEY=test-shell-key\n", encoding="utf-8")
+
+    assert (
+        shell_template_exports_env_var_before_command(
+            f"env HOME={home} bash -lc 'source ~/.anthropic.env && {{command}}'",
             "ANTHROPIC_API_KEY",
         )
         is True

@@ -447,6 +447,35 @@ def _shell_file_defines_function(path: Path, function_name: str) -> bool:
     return _shell_text_defines_function(text, function_name)
 
 
+def _shell_file_exports_env_var(
+    path: Path,
+    env_var: str,
+    *,
+    home: Path | None = None,
+    visited: set[Path] | None = None,
+) -> bool:
+    resolved_path = Path(os.path.normpath(str(path.resolve(strict=False))))
+    seen = visited or set()
+    if resolved_path in seen:
+        return False
+
+    text = _read_shell_file_text(resolved_path)
+    if text is None:
+        return False
+
+    placeholder = "__AGENTFLOW_SOURCED_ENV_EXPORT_TARGET__"
+    if _shell_command_exports_env_var_before_target(f"{text}\n; {placeholder}", env_var, placeholder):
+        return True
+
+    resolved_home = _resolved_home_path(home)
+    next_seen = seen | {resolved_path}
+    for token in _iter_shell_source_targets(text):
+        target = _resolve_shell_path(token, home=resolved_home)
+        if _shell_file_exports_env_var(target, env_var, home=resolved_home, visited=next_seen):
+            return True
+    return False
+
+
 def _shell_file_loads_function(
     path: Path,
     function_name: str,
@@ -538,6 +567,60 @@ def _shell_command_loads_function_from_sourced_file_before_target(
         if index > 0 and _is_command_flag(tokens[index - 1]) and _shell_command_loads_function_from_sourced_file_before_target(
             token,
             function_name,
+            target,
+            home=(
+                _shell_command_effective_home_for_target(command, active_command, home=home)
+                if active_command is not None
+                else home
+            ),
+        ):
+            return True
+
+        if expects_command:
+            if token in _COMMAND_POSITION_PREFIX_TOKENS:
+                prefix_allows_options = True
+                continue
+            if _looks_like_env_assignment(token):
+                continue
+            if prefix_allows_options and (token == "--" or token.startswith("-")):
+                continue
+            expects_command = False
+            prefix_allows_options = False
+            active_command = os.path.basename(token)
+        if _token_resets_command_position(token):
+            expects_command = True
+            prefix_allows_options = False
+            active_command = None
+    return False
+
+
+def _shell_command_loads_env_var_from_sourced_file_before_target(
+    command: str | None,
+    env_var: str,
+    target: str,
+    *,
+    home: Path | None = None,
+) -> bool:
+    if not isinstance(command, str) or not command.strip() or not env_var or not target:
+        return False
+
+    tokens = _split_shell_parts(command)
+    expects_command = True
+    prefix_allows_options = False
+    active_command: str | None = None
+    exported = False
+    for index, token in enumerate(tokens):
+        if active_command in _BASHRC_SOURCE_COMMANDS:
+            target_path = _resolve_shell_path(token, home=home)
+            if _shell_file_exports_env_var(target_path, env_var, home=home):
+                exported = True
+
+        if expects_command and _normalize_shell_token(token) == target:
+            return exported
+
+        if index > 0 and _is_command_flag(tokens[index - 1]) and _shell_command_loads_env_var_from_sourced_file_before_target(
+            token,
+            env_var,
             target,
             home=(
                 _shell_command_effective_home_for_target(command, active_command, home=home)
@@ -699,15 +782,21 @@ def _shell_init_loads_kimi_from_sourced_file_before_kimi(shell_init: Any, *, hom
     return False
 
 
-def shell_init_exports_env_var(shell_init: Any, env_var: str) -> bool:
+def shell_init_exports_env_var(shell_init: Any, env_var: str, *, home: Path | None = None) -> bool:
     rendered = render_shell_init(shell_init)
     if not rendered:
         return False
     placeholder = "__AGENTFLOW_ENV_EXPORT_TARGET__"
-    return _shell_command_exports_env_var_before_target(f"{rendered} && {placeholder}", env_var, placeholder)
+    command = f"{rendered} && {placeholder}"
+    return _shell_command_exports_env_var_before_target(command, env_var, placeholder) or _shell_command_loads_env_var_from_sourced_file_before_target(
+        command,
+        env_var,
+        placeholder,
+        home=home,
+    )
 
 
-def shell_template_exports_env_var_before_command(shell: str | None, env_var: str) -> bool:
+def shell_template_exports_env_var_before_command(shell: str | None, env_var: str, *, home: Path | None = None) -> bool:
     if not isinstance(shell, str) or not shell.strip():
         return False
 
@@ -721,7 +810,13 @@ def shell_template_exports_env_var_before_command(shell: str | None, env_var: st
         return False
 
     placeholder = "__AGENTFLOW_ENV_EXPORT_TARGET__"
-    return _shell_command_exports_env_var_before_target(shell.replace("{command}", placeholder), env_var, placeholder)
+    command = shell.replace("{command}", placeholder)
+    return _shell_command_exports_env_var_before_target(command, env_var, placeholder) or _shell_command_loads_env_var_from_sourced_file_before_target(
+        command,
+        env_var,
+        placeholder,
+        home=home,
+    )
 
 
 def _explicit_bashrc_kimi_warning(subject: str) -> str:

@@ -14,6 +14,7 @@ from agentflow.local_shell import (
     shell_init_exports_env_var,
     shell_init_uses_kimi_helper,
     shell_template_exports_env_var_before_command,
+    target_bash_home,
 )
 from agentflow.agents.registry import AdapterRegistry, default_adapter_registry
 from agentflow.context import render_node_prompt
@@ -234,8 +235,9 @@ def _auth_summary(node: NodeSpec, resolved_provider: object) -> str | None:
         api_key_env == "ANTHROPIC_API_KEY" and provider_uses_kimi_anthropic_auth(resolved_provider)
     )
     if getattr(target, "kind", None) == "local":
+        effective_home = target_bash_home(target)
         shell_init = getattr(target, "shell_init", None)
-        if shell_init_exports_env_var(shell_init, api_key_env):
+        if shell_init_exports_env_var(shell_init, api_key_env, home=effective_home):
             explicit_bootstrap_source = ("`target.shell_init`", "target.shell_init")
 
         shell = getattr(target, "shell", None)
@@ -243,6 +245,7 @@ def _auth_summary(node: NodeSpec, resolved_provider: object) -> str | None:
             shell_template_exports_env_var_before_command(
                 shell if isinstance(shell, str) else None,
                 api_key_env,
+                home=effective_home,
             )
             or shell_command_prefixes_env_var(shell if isinstance(shell, str) else None, api_key_env)
         ):
