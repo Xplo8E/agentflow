@@ -357,6 +357,116 @@ def _resolve_shell_path(path: str, *, home: Path | None = None) -> Path:
     return candidate
 
 
+def _resolve_static_path_entry(path_entry: str, *, home: Path) -> Path | None:
+    normalized = path_entry.strip()
+    if not normalized or normalized in {"$PATH", "${PATH}"}:
+        return None
+    if normalized == "~":
+        candidate = home
+    elif normalized.startswith("~/"):
+        candidate = home / normalized[2:]
+    elif normalized.startswith("$HOME/"):
+        candidate = home / normalized[6:]
+    elif normalized.startswith("${HOME}/"):
+        candidate = home / normalized[8:]
+    else:
+        raw_path = Path(normalized)
+        if not raw_path.is_absolute():
+            return None
+        candidate = raw_path
+    return Path(os.path.normpath(str(candidate)))
+
+
+def _path_entries_from_assignment_token(token: str, *, home: Path) -> tuple[Path, ...]:
+    normalized = _normalize_shell_expression_token(token)
+    if not _looks_like_env_assignment(normalized):
+        return ()
+    name, value = normalized.split("=", 1)
+    if name != "PATH":
+        return ()
+
+    entries: list[Path] = []
+    for raw_entry in value.split(":"):
+        resolved = _resolve_static_path_entry(raw_entry, home=home)
+        if resolved is not None:
+            entries.append(resolved)
+    return tuple(entries)
+
+
+def _shell_command_path_entries(command: str | None, *, home: Path) -> tuple[Path, ...]:
+    if not isinstance(command, str) or not command.strip():
+        return ()
+
+    tokens = _split_shell_parts(command)
+    expects_command = True
+    prefix_allows_options = False
+    active_command: str | None = None
+    declare_exports = False
+    pending_entries: tuple[Path, ...] = ()
+    shell_entries: list[Path] = []
+
+    for token in tokens:
+        normalized = _normalize_shell_token(token)
+        if _token_resets_command_position(token):
+            if expects_command and pending_entries:
+                shell_entries.extend(pending_entries)
+                pending_entries = ()
+            expects_command = True
+            prefix_allows_options = False
+            active_command = None
+            declare_exports = False
+            continue
+
+        if expects_command:
+            if _looks_like_env_assignment(token):
+                entries = _path_entries_from_assignment_token(token, home=home)
+                if entries:
+                    pending_entries = entries
+                continue
+            if token in _COMMAND_POSITION_PREFIX_TOKENS:
+                prefix_allows_options = True
+                continue
+            if prefix_allows_options and (token == "--" or token.startswith("-")):
+                continue
+            expects_command = False
+            prefix_allows_options = False
+            active_command = os.path.basename(token)
+            declare_exports = False
+            if active_command not in {"export", *_EXPORT_STYLE_COMMANDS}:
+                pending_entries = ()
+            continue
+
+        if active_command == "export":
+            if normalized == "--" or normalized.startswith("-"):
+                continue
+            entries = _path_entries_from_assignment_token(token, home=home)
+            if entries:
+                shell_entries.extend(entries)
+            if normalized == "PATH" and pending_entries:
+                shell_entries.extend(pending_entries)
+                pending_entries = ()
+            continue
+
+        if active_command in _EXPORT_STYLE_COMMANDS:
+            if normalized.startswith("-"):
+                if "x" in normalized.lstrip("-"):
+                    declare_exports = True
+                continue
+            if not declare_exports:
+                continue
+            entries = _path_entries_from_assignment_token(token, home=home)
+            if entries:
+                shell_entries.extend(entries)
+            if normalized == "PATH" and pending_entries:
+                shell_entries.extend(pending_entries)
+                pending_entries = ()
+
+    if expects_command and pending_entries:
+        shell_entries.extend(pending_entries)
+
+    return tuple(shell_entries)
+
+
 def _strip_shell_comments(line: str) -> str:
     quote: str | None = None
     escaped = False
@@ -528,6 +638,48 @@ def _shell_file_loads_function(
     return False
 
 
+def _shell_file_exposes_command(
+    path: Path,
+    command_name: str,
+    *,
+    home: Path | None = None,
+    visited: set[Path] | None = None,
+) -> bool:
+    resolved_path = Path(os.path.normpath(str(path.resolve(strict=False))))
+    seen = visited or set()
+    if resolved_path in seen:
+        return False
+
+    text = _read_shell_file_text(path)
+    if text is None:
+        return False
+
+    if path.name == ".bashrc" and _shell_text_returns_early_for_noninteractive_bash(text):
+        return False
+
+    if _shell_text_defines_function(text, command_name):
+        return True
+
+    resolved_home = _resolved_home_path(home)
+    for raw_line in text.splitlines():
+        line = _strip_shell_comments(raw_line).strip()
+        if not line:
+            continue
+        for entry in _shell_command_path_entries(line, home=resolved_home):
+            candidate = entry / command_name
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return True
+
+    next_seen = seen | {resolved_path}
+    for token in _iter_shell_source_targets(text):
+        target = _resolve_home_shell_source_target(token, resolved_home)
+        if target is None:
+            continue
+        if _shell_file_exposes_command(target, command_name, home=resolved_home, visited=next_seen):
+            return True
+    return False
+
+
 def _bash_login_startup_file(home: Path) -> Path | None:
     resolved_home = _resolved_home_path(home)
     for filename in _BASH_LOGIN_FILENAMES:
@@ -575,12 +727,12 @@ def _bash_login_startup_chain(home: Path, startup_file: Path, *, seen: frozenset
     return (name,)
 
 
-def bash_login_shell_loads_function(function_name: str, *, home: Path | None = None) -> bool:
+def bash_login_shell_loads_command(command_name: str, *, home: Path | None = None) -> bool:
     resolved_home = _resolved_home_path(home)
     startup_file = _bash_login_startup_file(resolved_home)
     if startup_file is None:
         return False
-    return _shell_file_loads_function(startup_file, function_name, home=resolved_home)
+    return _shell_file_exposes_command(startup_file, command_name, home=resolved_home)
 
 
 def _shell_command_loads_kimi_from_bash_env(command: str | None, *, home: Path | None = None) -> bool:
@@ -594,7 +746,7 @@ def _shell_command_loads_kimi_from_bash_env(command: str | None, *, home: Path |
         return False
     if _shell_text_returns_early_for_noninteractive_bash(text):
         return False
-    return _shell_file_loads_function(path, "kimi", home=resolved_home)
+    return _shell_file_exposes_command(path, "kimi", home=resolved_home)
 
 
 def _shell_command_loads_function_from_sourced_file_before_target(
@@ -615,7 +767,7 @@ def _shell_command_loads_function_from_sourced_file_before_target(
     for index, token in enumerate(tokens):
         if active_command in _BASHRC_SOURCE_COMMANDS:
             target_path = _resolve_shell_path(token, home=home)
-            if _shell_file_loads_function(target_path, function_name, home=home):
+            if _shell_file_exposes_command(target_path, function_name, home=home):
                 loaded_function = True
 
         if expects_command and _normalize_shell_token(token) == target:
@@ -1218,7 +1370,7 @@ def kimi_shell_init_requires_interactive_bash_warning(target: Any, *, home: Path
     shell_init = _target_value(target, "shell_init")
     shell = _target_value(target, "shell")
     effective_home = _shell_command_effective_home_for_target(shell if isinstance(shell, str) else None, "bash", home=home)
-    login_shell_loads_kimi = target_uses_login_bash(target) and bash_login_shell_loads_function("kimi", home=effective_home)
+    login_shell_loads_kimi = target_uses_login_bash(target) and bash_login_shell_loads_command("kimi", home=effective_home)
     if _shell_command_loads_kimi_from_bash_env(shell if isinstance(shell, str) else None, home=home):
         return None
     guarded_bashrc = bashrc_returns_early_for_noninteractive_shell(effective_home)

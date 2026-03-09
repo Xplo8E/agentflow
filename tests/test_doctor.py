@@ -79,6 +79,34 @@ def test_should_probe_local_claude_for_generic_local_target():
     assert _should_probe_local_claude(node) is True
 
 
+def test_should_probe_local_claude_when_login_shell_exposes_kimi_on_path(tmp_path: Path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('export PATH="$HOME/bin:$PATH"\n', encoding="utf-8")
+    bin_dir = home / "bin"
+    bin_dir.mkdir()
+    kimi = bin_dir / "kimi"
+    kimi.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    kimi.chmod(0o755)
+    node = SimpleNamespace(
+        agent=SimpleNamespace(value="claude"),
+        provider=ProviderConfig(
+            name="kimi",
+            base_url="https://api.kimi.com/coding/",
+            api_key_env="ANTHROPIC_API_KEY",
+        ),
+        target=SimpleNamespace(
+            kind="local",
+            shell=f"env HOME={home} bash",
+            shell_login=True,
+            shell_interactive=False,
+            shell_init="kimi",
+        ),
+    )
+
+    assert _should_probe_local_claude(node) is True
+
+
 def test_pipeline_local_codex_checks_use_custom_executable(monkeypatch):
     pipeline = SimpleNamespace(
         nodes=[

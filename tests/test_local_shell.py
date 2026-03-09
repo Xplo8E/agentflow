@@ -436,6 +436,27 @@ def test_kimi_shell_init_requires_interactive_bash_warning_accepts_login_shell_s
     assert kimi_shell_init_requires_interactive_bash_warning(target, home=home) is None
 
 
+def test_kimi_shell_init_requires_interactive_bash_warning_accepts_login_shell_startup_with_kimi_on_path(
+    tmp_path: Path,
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('export PATH="$HOME/bin:$PATH"\n', encoding="utf-8")
+    bin_dir = home / "bin"
+    bin_dir.mkdir()
+    kimi = bin_dir / "kimi"
+    kimi.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    kimi.chmod(0o755)
+    target = {
+        "kind": "local",
+        "shell": "bash",
+        "shell_login": True,
+        "shell_init": ["command -v kimi >/dev/null 2>&1", "kimi"],
+    }
+
+    assert kimi_shell_init_requires_interactive_bash_warning(target, home=home) is None
+
+
 def test_kimi_shell_init_requires_interactive_bash_warning_ignores_echoed_login_source_text(
     tmp_path: Path,
 ):
@@ -480,6 +501,25 @@ def test_shell_init_exports_env_var_detects_export_from_sourced_file(tmp_path: P
     (home / ".anthropic.env").write_text("export ANTHROPIC_API_KEY=test-shell-key\n", encoding="utf-8")
 
     assert shell_init_exports_env_var(["source ~/.anthropic.env"], "ANTHROPIC_API_KEY", home=home) is True
+
+
+def test_kimi_shell_init_requires_interactive_bash_warning_accepts_sourced_file_with_kimi_on_path(
+    tmp_path: Path,
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".agentflow-kimi").write_text('export PATH="$HOME/bin:$PATH"\n', encoding="utf-8")
+    bin_dir = home / "bin"
+    bin_dir.mkdir()
+    kimi = bin_dir / "kimi"
+    kimi.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    kimi.chmod(0o755)
+    target = {
+        "kind": "local",
+        "shell": "bash -lc 'source ~/.agentflow-kimi && kimi && {command}'",
+    }
+
+    assert kimi_shell_init_requires_interactive_bash_warning(target, home=home) is None
 
 
 def test_shell_template_exports_env_var_before_command_detects_nested_export():
