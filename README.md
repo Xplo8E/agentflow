@@ -375,6 +375,14 @@ Run a real local smoke check with your installed CLIs:
 agentflow smoke
 ```
 
+When you are iterating on local Kimi shell bootstrap behavior itself, run the lighter maintainer check first:
+
+```bash
+make toolchain-local
+```
+
+That command intentionally uses `bash -lic` before running `kimi`, `codex --version`, and `claude --version`, so it exercises the same login + interactive shell path that the bundled local smoke depends on. This avoids the easy-to-misread non-interactive `source ~/.bashrc` path where Bash often returns before the `kimi` helper is defined.
+
 From the repo root, `make inspect-local`, `make doctor-local`, `make smoke-local`, and `make check-local` wrap the same bundled Kimi-backed workflow and now prefer `.venv/bin/python` automatically when that repo-local virtualenv exists, falling back to `python3` otherwise. `make check-local` now delegates straight to `agentflow check-local`, which keeps the preflight and run in one pass instead of rerunning Doctor through `smoke-local`, while reusing the exact pipeline object that Doctor just validated. That CLI's stderr preflight report follows the requested run output style: summary for `--output summary`, JSON for `--output json`, and JSON for `--output json-summary`.
 
 This keeps the check small while exercising both local `codex` and local `claude` end-to-end. Before the bundled smoke pipeline starts, AgentFlow runs a local preflight that verifies `codex`, confirms that `bash -lic` can find the `kimi` shell helper and still launch both `claude` and `codex` afterwards, checks that `claude --version` still works inside that shared smoke shell, checks that `kimi` exports both `ANTHROPIC_API_KEY` and the Kimi Claude endpoint in `ANTHROPIC_BASE_URL`, confirms Codex authentication is ready inside that shared smoke shell via `codex login status` or `OPENAI_API_KEY`, and reports which bash login startup file is active, including transitive bridges such as `~/.bash_profile` -> `~/.profile` -> `~/.bashrc`. That startup check also accepts the common dotfiles pattern where `~/.bashrc` itself is a symlink into another repo. The preflight warns when a login startup file references `~/.bashrc` but that file is missing, or when no bash login startup file exists to bridge into `~/.bashrc` at all. If `codex` or `claude` only become available inside that shared login-shell bootstrap, the readiness report still stays green because the bundled smoke pipeline can already launch them there.
