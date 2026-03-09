@@ -9,9 +9,12 @@ from agentflow.local_shell import (
     kimi_shell_init_requires_bash_warning,
     kimi_shell_init_requires_interactive_bash_warning,
     probe_target_bash_startup_env_var,
+    shell_command_prefix_env_value,
     shell_command_prefixes_env_var,
     shell_init_exports_env_var,
+    shell_init_exported_env_var_value,
     shell_command_uses_kimi_helper,
+    shell_template_exported_env_var_value_before_command,
     shell_template_exports_env_var_before_command,
     shell_wrapper_requires_command_placeholder,
     summarize_target_bash_login_startup,
@@ -86,6 +89,10 @@ def test_shell_wrapper_requires_command_placeholder_detects_inline_command_paylo
 )
 def test_shell_command_prefixes_env_var_detects_prefix_assignments(command: str, env_var: str, expected: bool):
     assert shell_command_prefixes_env_var(command, env_var) is expected
+
+
+def test_shell_command_prefix_env_value_preserves_empty_prefix_assignment():
+    assert shell_command_prefix_env_value("env OPENAI_API_KEY= bash -c", "OPENAI_API_KEY") == ""
 
 
 def test_kimi_shell_init_requires_interactive_bash_warning_ignores_probe_only_shell():
@@ -648,6 +655,10 @@ def test_shell_init_exports_env_var_detects_exported_provider_key():
     assert shell_init_exports_env_var(["export ANTHROPIC_API_KEY=test-shell-key"], "ANTHROPIC_API_KEY") is True
 
 
+def test_shell_init_exported_env_var_value_preserves_empty_export():
+    assert shell_init_exported_env_var_value(["export ANTHROPIC_API_KEY="], "ANTHROPIC_API_KEY") == ""
+
+
 def test_shell_init_exports_env_var_ignores_non_exported_assignment():
     assert shell_init_exports_env_var(["ANTHROPIC_API_KEY=test-shell-key"], "ANTHROPIC_API_KEY") is False
 
@@ -696,6 +707,16 @@ def test_shell_template_exports_env_var_before_command_detects_nested_export():
             "ANTHROPIC_API_KEY",
         )
         is True
+    )
+
+
+def test_shell_template_exported_env_var_value_before_command_preserves_empty_export():
+    assert (
+        shell_template_exported_env_var_value_before_command(
+            "bash -lc 'export ANTHROPIC_API_KEY= && {command}'",
+            "ANTHROPIC_API_KEY",
+        )
+        == ""
     )
 
 

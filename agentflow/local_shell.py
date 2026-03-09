@@ -226,29 +226,30 @@ def _shell_command_prefix_env_for_target(command: str | None, target: str) -> di
     return {}
 
 
-def _shell_command_exports_env_var_before_target(command: str | None, env_var: str, target: str) -> bool:
+def _shell_command_exported_env_value_before_target(command: str | None, env_var: str, target: str) -> str | None:
     if not isinstance(command, str) or not command.strip() or not env_var or not target:
-        return False
+        return None
 
     tokens = _split_shell_parts(command)
     expects_command = True
     prefix_allows_options = False
     active_command: str | None = None
     declare_exports = False
-    assigned_in_shell = False
-    pending_assignment = False
-    exported = False
+    pending_assignments: dict[str, str] = {}
+    shell_values: dict[str, str] = {}
+    exported_value: str | None = None
 
     for index, token in enumerate(tokens):
         if index > 0 and _is_command_flag(tokens[index - 1]):
-            if _shell_command_exports_env_var_before_target(token, env_var, target):
-                return True
+            nested = _shell_command_exported_env_value_before_target(token, env_var, target)
+            if nested is not None:
+                return nested
 
         normalized = _normalize_shell_token(token)
         if _token_resets_command_position(token):
-            if expects_command and pending_assignment:
-                assigned_in_shell = True
-                pending_assignment = False
+            if expects_command and pending_assignments:
+                shell_values.update(pending_assignments)
+                pending_assignments = {}
             expects_command = True
             prefix_allows_options = False
             active_command = None
@@ -256,15 +257,15 @@ def _shell_command_exports_env_var_before_target(command: str | None, env_var: s
             continue
 
         if expects_command and normalized == target:
-            return exported
+            return exported_value
 
         if expects_command:
             if token in _COMMAND_POSITION_PREFIX_TOKENS:
                 prefix_allows_options = True
                 continue
             if _looks_like_env_assignment(token):
-                if _env_assignment_name(token) == env_var:
-                    pending_assignment = True
+                name, value = normalized.split("=", 1)
+                pending_assignments[name] = value
                 continue
             if prefix_allows_options and (token == "--" or token.startswith("-")):
                 continue
@@ -272,18 +273,29 @@ def _shell_command_exports_env_var_before_target(command: str | None, env_var: s
             prefix_allows_options = False
             active_command = os.path.basename(token)
             declare_exports = False
-            pending_assignment = False
             if normalized == target:
-                return exported
+                return exported_value
+            if active_command not in {"export", *_EXPORT_STYLE_COMMANDS}:
+                pending_assignments = {}
             continue
 
         if active_command == "export":
             if normalized == "--" or normalized.startswith("-"):
                 continue
-            if _env_assignment_name(token) == env_var:
-                exported = True
-            if normalized == env_var and assigned_in_shell:
-                exported = True
+            assignment_name = _env_assignment_name(token)
+            if assignment_name is not None:
+                _, value = normalized.split("=", 1)
+                shell_values[assignment_name] = value
+                if assignment_name == env_var:
+                    exported_value = value
+                continue
+            if normalized == env_var:
+                if env_var in pending_assignments:
+                    value = pending_assignments[env_var]
+                    shell_values[env_var] = value
+                    exported_value = value
+                elif env_var in shell_values:
+                    exported_value = shell_values[env_var]
             continue
 
         if active_command in _EXPORT_STYLE_COMMANDS:
@@ -291,13 +303,28 @@ def _shell_command_exports_env_var_before_target(command: str | None, env_var: s
                 if "x" in normalized.lstrip("-"):
                     declare_exports = True
                 continue
-            if declare_exports:
-                if _env_assignment_name(token) == env_var:
-                    exported = True
-                if normalized == env_var and assigned_in_shell:
-                    exported = True
+            if not declare_exports:
+                continue
+            assignment_name = _env_assignment_name(token)
+            if assignment_name is not None:
+                _, value = normalized.split("=", 1)
+                shell_values[assignment_name] = value
+                if assignment_name == env_var:
+                    exported_value = value
+                continue
+            if normalized == env_var:
+                if env_var in pending_assignments:
+                    value = pending_assignments[env_var]
+                    shell_values[env_var] = value
+                    exported_value = value
+                elif env_var in shell_values:
+                    exported_value = shell_values[env_var]
 
-    return False
+    return None
+
+
+def _shell_command_exports_env_var_before_target(command: str | None, env_var: str, target: str) -> bool:
+    return _shell_command_exported_env_value_before_target(command, env_var, target) is not None
 
 
 def _shell_command_prefix_env_value_for_target(command: str | None, env_var: str, target: str) -> str | None:
@@ -372,8 +399,12 @@ def _shell_command_prefix_env_value(command: str | None, env_var: str) -> str | 
 
 
 def shell_command_prefixes_env_var(command: str | None, env_var: str) -> bool:
+    return shell_command_prefix_env_value(command, env_var) is not None
+
+
+def shell_command_prefix_env_value(command: str | None, env_var: str) -> str | None:
     if not isinstance(command, str) or not command.strip() or not env_var:
-        return False
+        return None
 
     tokens = _split_shell_parts(command)
     expects_command = True
@@ -395,10 +426,10 @@ def shell_command_prefixes_env_var(command: str | None, env_var: str) -> bool:
                 continue
             target = _normalize_shell_token(os.path.basename(token))
             if not target:
-                return False
-            return _shell_command_prefix_env_value_for_target(command, env_var, target) is not None
+                return None
+            return _shell_command_prefix_env_value_for_target(command, env_var, target)
 
-    return False
+    return None
 
 
 def _resolved_home_path(home: Path | None) -> Path:
@@ -711,6 +742,48 @@ def _shell_file_defines_function(path: Path, function_name: str) -> bool:
     return _shell_text_defines_function(text, function_name)
 
 
+def _shell_file_exported_env_value(
+    path: Path,
+    env_var: str,
+    *,
+    home: Path | None = None,
+    cwd: Path | str | None = None,
+    env: dict[str, str] | None = None,
+    visited: set[Path] | None = None,
+) -> str | None:
+    resolved_path = Path(os.path.normpath(str(path.resolve(strict=False))))
+    seen = visited or set()
+    if resolved_path in seen:
+        return None
+
+    text = _read_shell_file_text(resolved_path)
+    if text is None:
+        return None
+
+    placeholder = "__AGENTFLOW_SOURCED_ENV_EXPORT_TARGET__"
+    exported_value = _shell_command_exported_env_value_before_target(f"{text}\n; {placeholder}", env_var, placeholder)
+    if exported_value is not None:
+        return exported_value
+
+    resolved_home = _resolved_home_path(home)
+    next_seen = seen | {resolved_path}
+    for token in _iter_shell_source_targets(text):
+        target = _resolve_shell_source_target(token, home=resolved_home, cwd=cwd, env=env)
+        if target is None:
+            continue
+        exported_value = _shell_file_exported_env_value(
+            target,
+            env_var,
+            home=resolved_home,
+            cwd=cwd,
+            env=env,
+            visited=next_seen,
+        )
+        if exported_value is not None:
+            return exported_value
+    return None
+
+
 def _shell_file_exports_env_var(
     path: Path,
     env_var: str,
@@ -720,35 +793,14 @@ def _shell_file_exports_env_var(
     env: dict[str, str] | None = None,
     visited: set[Path] | None = None,
 ) -> bool:
-    resolved_path = Path(os.path.normpath(str(path.resolve(strict=False))))
-    seen = visited or set()
-    if resolved_path in seen:
-        return False
-
-    text = _read_shell_file_text(resolved_path)
-    if text is None:
-        return False
-
-    placeholder = "__AGENTFLOW_SOURCED_ENV_EXPORT_TARGET__"
-    if _shell_command_exports_env_var_before_target(f"{text}\n; {placeholder}", env_var, placeholder):
-        return True
-
-    resolved_home = _resolved_home_path(home)
-    next_seen = seen | {resolved_path}
-    for token in _iter_shell_source_targets(text):
-        target = _resolve_shell_source_target(token, home=resolved_home, cwd=cwd, env=env)
-        if target is None:
-            continue
-        if _shell_file_exports_env_var(
-            target,
-            env_var,
-            home=resolved_home,
-            cwd=cwd,
-            env=env,
-            visited=next_seen,
-        ):
-            return True
-    return False
+    return _shell_file_exported_env_value(
+        path,
+        env_var,
+        home=home,
+        cwd=cwd,
+        env=env,
+        visited=visited,
+    ) is not None
 
 
 def _shell_file_loads_function(
@@ -970,6 +1022,31 @@ def _shell_command_loads_kimi_from_bash_env(
     return _shell_file_exposes_command(path, "kimi", home=resolved_home, cwd=cwd, env=env)
 
 
+def _shell_command_env_var_value_from_bash_env(
+    command: str | None,
+    env_var: str,
+    *,
+    home: Path | None = None,
+    cwd: Path | str | None = None,
+    env: dict[str, str] | None = None,
+) -> str | None:
+    if not isinstance(command, str) or not command.strip() or not env_var:
+        return None
+
+    resolved_home = _shell_command_effective_home_for_target(command, "bash", home=home, cwd=cwd)
+    bash_env = _shell_command_prefix_env_value_for_target(command, "BASH_ENV", "bash")
+    if not bash_env:
+        return None
+
+    path = _resolve_shell_path(bash_env, home=resolved_home, cwd=cwd, env=env)
+    text = _read_shell_file_text(path)
+    if text is None:
+        return None
+    if _shell_text_returns_early_for_noninteractive_bash(text):
+        return None
+    return _shell_file_exported_env_value(path, env_var, home=resolved_home, cwd=cwd, env=env)
+
+
 def _shell_command_loads_env_var_from_bash_env(
     command: str | None,
     env_var: str,
@@ -978,21 +1055,7 @@ def _shell_command_loads_env_var_from_bash_env(
     cwd: Path | str | None = None,
     env: dict[str, str] | None = None,
 ) -> bool:
-    if not isinstance(command, str) or not command.strip() or not env_var:
-        return False
-
-    resolved_home = _shell_command_effective_home_for_target(command, "bash", home=home, cwd=cwd)
-    bash_env = _shell_command_prefix_env_value_for_target(command, "BASH_ENV", "bash")
-    if not bash_env:
-        return False
-
-    path = _resolve_shell_path(bash_env, home=resolved_home, cwd=cwd, env=env)
-    text = _read_shell_file_text(path)
-    if text is None:
-        return False
-    if _shell_text_returns_early_for_noninteractive_bash(text):
-        return False
-    return _shell_file_exports_env_var(path, env_var, home=resolved_home, cwd=cwd, env=env)
+    return _shell_command_env_var_value_from_bash_env(command, env_var, home=home, cwd=cwd, env=env) is not None
 
 
 def _shell_command_loads_function_from_sourced_file_before_target(
@@ -1059,7 +1122,7 @@ def _shell_command_loads_function_from_sourced_file_before_target(
     return False
 
 
-def _shell_command_loads_env_var_from_sourced_file_before_target(
+def _shell_command_env_var_value_from_sourced_file_before_target(
     command: str | None,
     env_var: str,
     target: str,
@@ -1067,31 +1130,34 @@ def _shell_command_loads_env_var_from_sourced_file_before_target(
     home: Path | None = None,
     cwd: Path | str | None = None,
     env: dict[str, str] | None = None,
-) -> bool:
+) -> str | None:
     if not isinstance(command, str) or not command.strip() or not env_var or not target:
-        return False
+        return None
 
     tokens = _split_shell_parts(command)
     expects_command = True
     prefix_allows_options = False
     active_command: str | None = None
-    exported = False
+    exported_value: str | None = None
     for index, token in enumerate(tokens):
         if active_command in _BASHRC_SOURCE_COMMANDS:
             target_path = _resolve_shell_source_target(token, home=_resolved_home_path(home), cwd=cwd, env=env)
-            if target_path is not None and _shell_file_exports_env_var(
-                target_path,
-                env_var,
-                home=home,
-                cwd=cwd,
-                env=env,
-            ):
-                exported = True
+            if target_path is not None:
+                sourced_value = _shell_file_exported_env_value(
+                    target_path,
+                    env_var,
+                    home=home,
+                    cwd=cwd,
+                    env=env,
+                )
+                if sourced_value is not None:
+                    exported_value = sourced_value
 
         if expects_command and _normalize_shell_token(token) == target:
-            return exported
+            return exported_value
 
-        if index > 0 and _is_command_flag(tokens[index - 1]) and _shell_command_loads_env_var_from_sourced_file_before_target(
+        if index > 0 and _is_command_flag(tokens[index - 1]):
+            nested = _shell_command_env_var_value_from_sourced_file_before_target(
                 token,
                 env_var,
                 target,
@@ -1102,8 +1168,9 @@ def _shell_command_loads_env_var_from_sourced_file_before_target(
                 ),
                 cwd=cwd,
                 env=env,
-            ):
-            return True
+            )
+            if nested is not None:
+                return nested
 
         if expects_command:
             if token in _COMMAND_POSITION_PREFIX_TOKENS:
@@ -1120,7 +1187,26 @@ def _shell_command_loads_env_var_from_sourced_file_before_target(
             expects_command = True
             prefix_allows_options = False
             active_command = None
-    return False
+    return None
+
+
+def _shell_command_loads_env_var_from_sourced_file_before_target(
+    command: str | None,
+    env_var: str,
+    target: str,
+    *,
+    home: Path | None = None,
+    cwd: Path | str | None = None,
+    env: dict[str, str] | None = None,
+) -> bool:
+    return _shell_command_env_var_value_from_sourced_file_before_target(
+        command,
+        env_var,
+        target,
+        home=home,
+        cwd=cwd,
+        env=env,
+    ) is not None
 
 
 def _shell_command_loads_function_from_sourced_file(
@@ -1296,12 +1382,26 @@ def shell_init_exports_env_var(
     cwd: Path | str | None = None,
     env: dict[str, str] | None = None,
 ) -> bool:
+    return shell_init_exported_env_var_value(shell_init, env_var, home=home, cwd=cwd, env=env) is not None
+
+
+def shell_init_exported_env_var_value(
+    shell_init: Any,
+    env_var: str,
+    *,
+    home: Path | None = None,
+    cwd: Path | str | None = None,
+    env: dict[str, str] | None = None,
+) -> str | None:
     rendered = render_shell_init(shell_init)
     if not rendered:
-        return False
+        return None
     placeholder = "__AGENTFLOW_ENV_EXPORT_TARGET__"
     command = f"{rendered} && {placeholder}"
-    return _shell_command_exports_env_var_before_target(command, env_var, placeholder) or _shell_command_loads_env_var_from_sourced_file_before_target(
+    exported_value = _shell_command_exported_env_value_before_target(command, env_var, placeholder)
+    if exported_value is not None:
+        return exported_value
+    return _shell_command_env_var_value_from_sourced_file_before_target(
         command,
         env_var,
         placeholder,
@@ -1319,24 +1419,46 @@ def shell_template_exports_env_var_before_command(
     cwd: Path | str | None = None,
     env: dict[str, str] | None = None,
 ) -> bool:
+    return shell_template_exported_env_var_value_before_command(
+        shell,
+        env_var,
+        home=home,
+        cwd=cwd,
+        env=env,
+    ) is not None
+
+
+def shell_template_exported_env_var_value_before_command(
+    shell: str | None,
+    env_var: str,
+    *,
+    home: Path | None = None,
+    cwd: Path | str | None = None,
+    env: dict[str, str] | None = None,
+) -> str | None:
     if not isinstance(shell, str) or not shell.strip():
-        return False
+        return None
 
     if shell_wrapper_requires_command_placeholder(shell):
-        return False
+        return None
 
-    if _shell_command_prefix_env_value(shell, env_var) is not None:
-        return True
+    prefixed_value = _shell_command_prefix_env_value(shell, env_var)
+    if prefixed_value is not None:
+        return prefixed_value
 
-    if _shell_command_loads_env_var_from_bash_env(shell, env_var, home=home, cwd=cwd, env=env):
-        return True
+    bash_env_value = _shell_command_env_var_value_from_bash_env(shell, env_var, home=home, cwd=cwd, env=env)
+    if bash_env_value is not None:
+        return bash_env_value
 
     if "{command}" not in shell:
-        return False
+        return None
 
     placeholder = "__AGENTFLOW_ENV_EXPORT_TARGET__"
     command = shell.replace("{command}", placeholder)
-    return _shell_command_exports_env_var_before_target(command, env_var, placeholder) or _shell_command_loads_env_var_from_sourced_file_before_target(
+    exported_value = _shell_command_exported_env_value_before_target(command, env_var, placeholder)
+    if exported_value is not None:
+        return exported_value
+    return _shell_command_env_var_value_from_sourced_file_before_target(
         command,
         env_var,
         placeholder,
