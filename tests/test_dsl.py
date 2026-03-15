@@ -421,6 +421,7 @@ def test_codex_fuzz_campaign_registers_batched_pipeline_with_defaults():
             batch_size=4,
         )
 
+    payload = dag.to_payload()
     spec = dag.to_spec()
     nodes = spec.node_map
 
@@ -432,6 +433,9 @@ def test_codex_fuzz_campaign_registers_batched_pipeline_with_defaults():
     assert spec.fail_fast is True
     assert len(spec.fanouts["fuzzer"]) == 32
     assert len(spec.fanouts["batch_merge"]) == 8
+    assert payload["nodes"][1]["fanout"]["preset"]["name"] == "browser-surface"
+    assert payload["nodes"][1]["fanout"]["preset"]["bucket_count"] == 2
+    assert "matrix" not in payload["nodes"][1]["fanout"]
     assert nodes["init"].tools == "read_write"
     assert nodes["init"].success_criteria[0].value == "INIT_OK"
     assert nodes["fuzzer_00"].fanout_member["target"] == "blink"

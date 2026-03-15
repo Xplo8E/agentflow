@@ -13,6 +13,7 @@ Use this page to choose a starter without reading every bundled YAML file.
 
 | Starter | Use it when | Key features |
 | --- | --- | --- |
+| `codex-fuzz-campaign` | You want one obvious preset-backed starter and only need to choose the reducer shape. | `codex_fuzz_campaign()` defaults rendered to YAML, `layout=flat|batched|grouped`, native `fanout.preset`. |
 | `codex-fuzz-swarm` | The campaign is homogeneous and you only need a single final reducer. | `fanout.count`, shared init, resize with `--set shards=...`. |
 | `codex-fuzz-batched` | The campaign is homogeneous, but a single reducer would be too noisy. | `fanout.batches`, `current.scope`, scoped intermediate reducers. |
 | `codex-fuzz-matrix` | The shard roster is a clean cartesian product. | `fanout.matrix`. |
@@ -50,8 +51,9 @@ The fixed `*-128` examples are reference snapshots when you want to inspect a fu
 ## Practical rules
 
 - Start with `codex-fanout-repo-sweep` for small repo reviews and move to `codex-repo-sweep-batched` once you need 32+ Codex workers or staged reducers.
+- Start with `codex-fuzz-campaign` when the roster already matches a built-in preset and you just need to choose `flat`, `batched`, or `grouped`.
+- Use `codex-fuzz-preset-batched` when you specifically want to study or customize the lower-level native `fanout.preset` plus `fanout.batches` pattern directly in YAML.
 - Start with `codex-fuzz-swarm` for homogeneous campaigns, then move to `codex-fuzz-batched` when the final reducer becomes too large to read.
-- Use `codex-fuzz-preset-batched` when the roster already matches a built-in preset and you want the 128-shard staged-reducer shape without maintaining sidecar manifests.
 - Use the matrix starters when shard metadata is derivable, and use the catalog starters when every shard needs explicit maintainer-owned metadata.
 - Use `agentflow template-presets` plus `--set preset=...` when you want a realistic starting roster such as `browser-surface` or `protocol-stack` before hand-tuning the generated manifests or CSV files.
 - Use `airflow_like_fuzz_campaign.py` when you want the helper to register the whole preset-backed campaign shape for you instead of wiring `init`, `fuzzer`, reducers, and `merge` by hand.

@@ -52,6 +52,7 @@ _DEFAULT_FUZZ_BATCHED_CONCURRENCY = 32
 _DEFAULT_FUZZ_PRESET_BATCHED_BUCKET_COUNT = 8
 _DEFAULT_FUZZ_PRESET_BATCHED_BATCH_SIZE = 16
 _DEFAULT_FUZZ_PRESET_BATCHED_CONCURRENCY = 32
+_DEFAULT_FUZZ_CAMPAIGN_LAYOUT = "batched"
 _DEFAULT_CODEX_REPO_SWEEP_BATCHED_SHARDS = 128
 _DEFAULT_CODEX_REPO_SWEEP_BATCHED_BATCH_SIZE = 16
 _DEFAULT_CODEX_REPO_SWEEP_BATCHED_CONCURRENCY = 32
@@ -170,6 +171,20 @@ def _resolve_fuzz_campaign_preset(
         raise ValueError(
             f"template `{template_name}` expects `preset` to be one of {available}, got `{preset_name}`"
         ) from exc
+
+
+def _resolve_fuzz_campaign_layout(template_name: str, raw_values: Mapping[str, str]) -> str:
+    layout = _template_string_value(
+        template_name,
+        "layout",
+        raw_values.get("layout"),
+        default=_DEFAULT_FUZZ_CAMPAIGN_LAYOUT,
+    ).lower()
+    if layout not in {"flat", "batched", "grouped"}:
+        raise ValueError(
+            f"template `{template_name}` expects `layout` to be one of `flat`, `batched`, or `grouped`, got `{layout}`"
+        )
+    return layout
 
 
 def _fanout_suffix(index: int, count: int) -> str:
@@ -966,6 +981,78 @@ nodes:
         focus=focus,
     )
     return RenderedBundledTemplate(yaml=rendered_yaml)
+
+
+def _render_codex_fuzz_campaign_template(values: Mapping[str, str] | None = None) -> RenderedBundledTemplate:
+    from agentflow.dsl import DAG
+    from agentflow.fuzz import codex_fuzz_campaign
+
+    template_name = "codex-fuzz-campaign"
+    raw_values = dict(values or {})
+    allowed = {"preset", "layout", "bucket_count", "batch_size", "concurrency", "name", "working_dir"}
+    _validate_template_settings(template_name, raw_values, allowed=allowed)
+
+    preset = _resolve_fuzz_campaign_preset(template_name, raw_values)
+    layout = _resolve_fuzz_campaign_layout(template_name, raw_values)
+    bucket_count = _parse_positive_template_int(
+        template_name,
+        "bucket_count",
+        raw_values.get("bucket_count", str(_DEFAULT_FUZZ_PRESET_BATCHED_BUCKET_COUNT)),
+    )
+    concurrency = _parse_positive_template_int(
+        template_name,
+        "concurrency",
+        raw_values.get("concurrency", str(_DEFAULT_FUZZ_PRESET_BATCHED_CONCURRENCY)),
+    )
+    batch_size = _parse_positive_template_int(
+        template_name,
+        "batch_size",
+        raw_values.get("batch_size", str(_DEFAULT_FUZZ_PRESET_BATCHED_BATCH_SIZE)),
+    )
+    if layout != "batched" and "batch_size" in raw_values:
+        raise ValueError(f"template `{template_name}` only uses `batch_size` when `layout=batched`")
+
+    total_shards = _fuzz_campaign_total_shards(bucket_count, preset=preset)
+    name = _template_string_value(
+        template_name,
+        "name",
+        raw_values.get("name"),
+        default=f"codex-fuzz-campaign-{preset.name}-{layout}-{total_shards}",
+    )
+    working_dir = _template_string_value(
+        template_name,
+        "working_dir",
+        raw_values.get("working_dir"),
+        default=f"./codex_fuzz_campaign_{preset.name.replace('-', '_')}_{layout}_{total_shards}",
+    )
+
+    layout_blurb = {
+        "flat": "a single final merge",
+        "batched": "staged batched reducers",
+        "grouped": "grouped family reducers",
+    }[layout]
+    description = (
+        f"Configurable {total_shards}-shard preset-backed Codex fuzz campaign generated from the "
+        f"`{preset.name}` preset with `codex_fuzz_campaign()` and {layout_blurb}."
+    )
+
+    with DAG(
+        name,
+        description=description,
+        working_dir=working_dir,
+        concurrency=concurrency,
+        fail_fast=True,
+    ) as dag:
+        campaign_kwargs: dict[str, object] = {
+            "preset": preset.name,
+            "bucket_count": bucket_count,
+            "layout": layout,
+        }
+        if layout == "batched":
+            campaign_kwargs["batch_size"] = batch_size
+        codex_fuzz_campaign(**campaign_kwargs)
+
+    return RenderedBundledTemplate(yaml=dag.to_yaml())
 
 
 def _render_codex_fuzz_swarm_template(values: Mapping[str, str] | None = None) -> RenderedBundledTemplate:
@@ -2267,6 +2354,48 @@ _BUNDLED_TEMPLATES = (
         support_files=("manifests/codex-fuzz-browser-128.axes.yaml",),
     ),
     BundledTemplate(
+        name="codex-fuzz-campaign",
+        example_name="fuzz/codex-fuzz-campaign.yaml",
+        description="Configurable preset-backed Codex fuzz campaign scaffold powered by `codex_fuzz_campaign()` and selectable `flat`, `batched`, or `grouped` layouts.",
+        parameters=(
+            BundledTemplateParameter(
+                name="preset",
+                description="Built-in fuzz campaign preset. Use `agentflow template-presets` to list choices.",
+                default=_DEFAULT_FUZZ_CAMPAIGN_PRESET,
+            ),
+            BundledTemplateParameter(
+                name="layout",
+                description="Reducer layout: `flat`, `batched`, or `grouped`.",
+                default=_DEFAULT_FUZZ_CAMPAIGN_LAYOUT,
+            ),
+            BundledTemplateParameter(
+                name="bucket_count",
+                description="Number of reusable seed buckets to expand from the preset roster.",
+                default=str(_DEFAULT_FUZZ_PRESET_BATCHED_BUCKET_COUNT),
+            ),
+            BundledTemplateParameter(
+                name="batch_size",
+                description="Number of preset-backed shards each intermediate reducer should own when `layout=batched`.",
+                default=str(_DEFAULT_FUZZ_PRESET_BATCHED_BATCH_SIZE),
+            ),
+            BundledTemplateParameter(
+                name="concurrency",
+                description="Maximum number of shards to run in parallel.",
+                default=str(_DEFAULT_FUZZ_PRESET_BATCHED_CONCURRENCY),
+            ),
+            BundledTemplateParameter(
+                name="name",
+                description="Pipeline name override.",
+                default="codex-fuzz-campaign-<preset>-<layout>-<shards>",
+            ),
+            BundledTemplateParameter(
+                name="working_dir",
+                description="Pipeline working directory override.",
+                default="./codex_fuzz_campaign_<preset>_<layout>_<shards>",
+            ),
+        ),
+    ),
+    BundledTemplate(
         name="codex-fuzz-preset-batched",
         example_name="fuzz/codex-fuzz-preset-batched.yaml",
         description="Configurable preset-backed Codex fuzz campaign that uses native `fanout.preset` plus `fanout.batches` to keep large 128-shard runs in one YAML file.",
@@ -2492,6 +2621,7 @@ _BUNDLED_TEMPLATE_FILES = {template.name: template.example_name for template in 
 _BUNDLED_TEMPLATE_SUPPORT_FILES = {template.name: template.support_files for template in _BUNDLED_TEMPLATES}
 _BUNDLED_TEMPLATE_RENDERERS = {
     "codex-repo-sweep-batched": _render_codex_repo_sweep_batched_template,
+    "codex-fuzz-campaign": _render_codex_fuzz_campaign_template,
     "codex-fuzz-hierarchical-grouped": _render_codex_fuzz_hierarchical_grouped_template,
     "codex-fuzz-hierarchical-manifest": _render_codex_fuzz_hierarchical_template,
     "codex-fuzz-matrix-manifest": _render_codex_fuzz_matrix_manifest_template,

@@ -85,6 +85,17 @@ def test_bundled_templates_expose_descriptions_and_example_files():
     assert by_name["codex-fuzz-browser-128"].example_name == "fuzz/codex-fuzz-browser-128.yaml"
     assert "browser-surface" in by_name["codex-fuzz-browser-128"].description
     assert by_name["codex-fuzz-browser-128"].support_files == ("manifests/codex-fuzz-browser-128.axes.yaml",)
+    assert by_name["codex-fuzz-campaign"].example_name == "fuzz/codex-fuzz-campaign.yaml"
+    assert "codex_fuzz_campaign()" in by_name["codex-fuzz-campaign"].description
+    assert tuple(parameter.name for parameter in by_name["codex-fuzz-campaign"].parameters) == (
+        "preset",
+        "layout",
+        "bucket_count",
+        "batch_size",
+        "concurrency",
+        "name",
+        "working_dir",
+    )
     assert by_name["codex-fuzz-preset-batched"].example_name == "fuzz/codex-fuzz-preset-batched.yaml"
     assert "fanout.preset" in by_name["codex-fuzz-preset-batched"].description
     assert tuple(parameter.name for parameter in by_name["codex-fuzz-preset-batched"].parameters) == (
@@ -626,6 +637,54 @@ def test_bundled_codex_fuzz_browser_128_template_matches_default_example_files()
     assert len(rendered.support_files) == 1
     assert rendered.support_files[0].relative_path == "manifests/codex-fuzz-browser-128.axes.yaml"
     assert rendered.support_files[0].content == expected_axes
+
+
+def test_bundled_codex_fuzz_campaign_template_is_available():
+    assert "codex-fuzz-campaign" in bundled_template_names()
+    assert "\nname: codex-fuzz-campaign-oss-fuzz-core-batched-128\n" in (
+        f"\n{load_bundled_template_yaml('codex-fuzz-campaign')}"
+    )
+
+
+def test_bundled_codex_fuzz_campaign_template_matches_default_example_file():
+    expected = bundled_template_path("codex-fuzz-campaign").read_text(encoding="utf-8")
+
+    assert load_bundled_template_yaml("codex-fuzz-campaign") == expected
+
+
+def test_bundled_codex_fuzz_campaign_template_accepts_grouped_overrides(tmp_path):
+    rendered = load_bundled_template_yaml(
+        "codex-fuzz-campaign",
+        values={
+            "preset": "browser-surface",
+            "layout": "grouped",
+            "bucket_count": "2",
+            "concurrency": "10",
+            "name": "browser-campaign-grouped-32",
+            "working_dir": "./browser_campaign_grouped",
+        },
+    )
+
+    assert "name: browser-campaign-grouped-32\n" in rendered
+    assert "working_dir: ./browser_campaign_grouped\n" in rendered
+    assert "concurrency: 10\n" in rendered
+    assert "fanout:\n    as: shard\n    preset:\n      name: browser-surface" in rendered
+    assert "group_by:" in rendered
+    assert "fields:\n      - target\n      - corpus" in rendered
+    assert "fail_fast: true" in rendered
+
+    pipeline_path = tmp_path / "browser-campaign-grouped.yaml"
+    pipeline_path.write_text(rendered, encoding="utf-8")
+    pipeline = load_pipeline_from_path(str(pipeline_path))
+
+    assert pipeline.concurrency == 10
+    assert pipeline.fail_fast is True
+    assert len(pipeline.fanouts["fuzzer"]) == 32
+    assert len(pipeline.fanouts["family_merge"]) == 4
+    assert pipeline.node_map["fuzzer_00"].fanout_member["target"] == "blink"
+    assert pipeline.node_map["fuzzer_00"].target.cwd.endswith("browser_campaign_grouped/agents/blink_asan_seed_001_00")
+    assert pipeline.node_map["family_merge_0"].fanout_member["target"] == "blink"
+    assert pipeline.node_map["merge"].depends_on == pipeline.fanouts["family_merge"]
 
 
 def test_bundled_codex_fuzz_preset_batched_template_is_available():

@@ -6,7 +6,7 @@ import re
 from typing import Any, Literal, Mapping
 
 from agentflow.defaults import default_fuzz_campaign_preset_name
-from agentflow.dsl import NodeBuilder, codex, fanout_batches, fanout_group_by, fanout_matrix
+from agentflow.dsl import NodeBuilder, codex, fanout_batches, fanout_group_by, fanout_matrix, fanout_preset
 from agentflow.fuzz_presets import build_codex_fuzz_campaign_matrix_payload, codex_fuzz_campaign_preset_names
 
 _DEFAULT_BUCKET_COUNT = 4
@@ -437,7 +437,7 @@ def codex_fuzz_campaign(
         ),
         **_merge_node_kwargs(
             {
-                "fanout": codex_fuzz_campaign_matrix(
+                "fanout": fanout_preset(
                     preset=preset,
                     bucket_count=bucket_count,
                     as_="shard",
@@ -447,7 +447,7 @@ def codex_fuzz_campaign(
                     seed_label_prefix=seed_label_prefix,
                     seed_label_width=seed_label_width,
                     extra_axes=extra_axes,
-                    derive=derive,
+                    derive=deepcopy(dict(derive)) if derive is not None else None,
                     include=include,
                     exclude=exclude,
                 ),
