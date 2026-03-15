@@ -1311,8 +1311,6 @@ def _drop_inherited_bootstrap_defaults(local_target_defaults: dict[str, Any]) ->
 def apply_local_target_defaults(payload: dict[str, Any]) -> dict[str, Any]:
     resolved = dict(payload)
     local_target_defaults = _local_target_defaults_payload(resolved.get("local_target_defaults"))
-    if local_target_defaults is None:
-        return resolved
 
     nodes = resolved.get("nodes")
     if not isinstance(nodes, list):
@@ -1327,12 +1325,19 @@ def apply_local_target_defaults(payload: dict[str, Any]) -> dict[str, Any]:
         updated_node = dict(node)
         target = updated_node.get("target")
         if target is None:
+            if local_target_defaults is None:
+                merged_nodes.append(updated_node)
+                continue
             updated_node["target"] = dict(local_target_defaults)
             merged_nodes.append(updated_node)
             continue
 
         target_payload = _local_target_defaults_payload(target)
         if target_payload is None:
+            merged_nodes.append(updated_node)
+            continue
+        if local_target_defaults is None:
+            updated_node["target"] = target_payload
             merged_nodes.append(updated_node)
             continue
 

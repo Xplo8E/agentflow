@@ -25,6 +25,13 @@ Use this page to choose a starter without reading every bundled YAML file.
 
 The fixed `*-128` examples are reference snapshots when you want to inspect a full large DAG directly from the repo instead of rendering one with `agentflow init`.
 
+## Python DAGs
+
+| Example | Use it when | Key features |
+| --- | --- | --- |
+| `airflow_like.py` | You want the smallest Python-authored DAG reference. | Static dependencies with `plan >> [implement, review]`. |
+| `airflow_like_fuzz_batched.py` | You want a 128-shard Codex swarm authored from Python instead of YAML templates. | `DAG(node_defaults=..., agent_defaults=..., fail_fast=...)`, `fanout_count(...)`, `fanout_batches(...)`. |
+
 ## Local smoke flows
 
 | Starter | Use it when | Key features |

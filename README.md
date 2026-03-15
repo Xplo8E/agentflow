@@ -70,6 +70,8 @@ Choose a starter:
 - `codex-fuzz-batched` for 128-shard homogeneous swarms that need automatic intermediate reducers
 - `codex-fuzz-swarm` for homogeneous shard swarms you resize with `--set shards=...`
 
+Prefer Python authoring for large swarms? `examples/airflow_like_fuzz_batched.py` shows a runnable 128-shard Codex campaign that uses `DAG(node_defaults=..., agent_defaults=..., fail_fast=True)` with `fanout_count(...)` and `fanout_batches(...)` instead of hand-writing raw fanout dictionaries.
+
 ## Example
 
 `examples/pipeline.yaml`

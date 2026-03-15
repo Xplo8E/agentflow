@@ -134,6 +134,26 @@ def test_load_pipeline_from_data_resolves_relative_paths_from_explicit_base_dir(
     assert pipeline.nodes[0].target.cwd == str((workspace / "task").resolve())
 
 
+def test_load_pipeline_from_text_accepts_local_target_shorthand_without_kind(tmp_path):
+    workspace = tmp_path / "workspace"
+    pipeline = load_pipeline_from_text(
+        """name: local-target-shorthand
+working_dir: .
+nodes:
+  - id: plan
+    agent: codex
+    prompt: hi
+    target:
+      cwd: task
+""",
+        base_dir=workspace,
+    )
+
+    assert pipeline.working_dir == str(workspace.resolve())
+    assert pipeline.nodes[0].target.kind == "local"
+    assert pipeline.nodes[0].target.cwd == str((workspace / "task").resolve())
+
+
 def test_load_pipeline_from_text_resolves_node_defaults_and_agent_defaults_relative_targets(tmp_path):
     workspace = tmp_path / "workspace"
     pipeline = load_pipeline_from_text(

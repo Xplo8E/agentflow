@@ -30,7 +30,12 @@ with DAG("demo", working_dir=".", concurrency=3) as dag:
 spec = dag.to_spec()
 ```
 
-See `examples/airflow_like.py` for a complete runnable example.
+The Python helpers accept the same per-node kwargs as YAML, including `fanout`.
+Import `fanout_count(...)`, `fanout_values(...)`, `fanout_matrix(...)`, `fanout_group_by(...)`, or `fanout_batches(...)` when you want a Python-native way to build those fanout payloads instead of writing raw dictionaries inline.
+`DAG(...)` also accepts `fail_fast`, `node_defaults`, `agent_defaults`, and `local_target_defaults`, so large swarms can keep shared launch policy in one place instead of repeating it on every node.
+Use `dag.to_payload()` when you want to serialize that Python-authored DAG back to JSON or YAML without losing compact fanout directives; use `dag.to_spec()` when you want the fully expanded, validated pipeline object in memory.
+
+See `examples/airflow_like.py` for the small static DAG and `examples/airflow_like_fuzz_batched.py` for a runnable 128-shard Codex swarm that uses `fanout.batches` plus pipeline defaults.
 
 ## Pipeline schema
 
