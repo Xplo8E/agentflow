@@ -38,6 +38,9 @@ class RenderedBundledTemplate:
 
 _DEFAULT_FUZZ_SWARM_SHARDS = 32
 _DEFAULT_FUZZ_SWARM_CONCURRENCY = 8
+_DEFAULT_FUZZ_BATCHED_SHARDS = 128
+_DEFAULT_FUZZ_BATCHED_BATCH_SIZE = 16
+_DEFAULT_FUZZ_BATCHED_CONCURRENCY = 32
 _DEFAULT_FUZZ_MATRIX_MANIFEST_BUCKET_COUNT = 4
 _DEFAULT_FUZZ_MATRIX_MANIFEST_CONCURRENCY = 16
 _DEFAULT_FUZZ_HIERARCHICAL_BUCKET_COUNT = 4
@@ -266,23 +269,21 @@ nodes:
     depends_on: [fuzzer]
     timeout_seconds: 300
     prompt: |
-      {% set target = "{{ family.target }}" %}
-      {% set corpus = "{{ family.corpus }}" %}
-      {% set target_completed = fanouts.fuzzer.completed.nodes | selectattr("target", "equalto", target) | list %}
-      {% set target_failed = fanouts.fuzzer.failed.nodes | selectattr("target", "equalto", target) | list %}
-      {% set target_outputs = fanouts.fuzzer.with_output.nodes | selectattr("target", "equalto", target) | list %}
-      Prepare the maintainer handoff for target family {{ target }} (corpus {{ corpus }}).
+      {% set target_completed = fanouts.fuzzer.completed.nodes | selectattr("target", "equalto", current.target) | list %}
+      {% set target_failed = fanouts.fuzzer.failed.nodes | selectattr("target", "equalto", current.target) | list %}
+      {% set target_outputs = fanouts.fuzzer.with_output.nodes | selectattr("target", "equalto", current.target) | list %}
+      Prepare the maintainer handoff for target family {{ current.target }} (corpus {{ current.corpus }}).
 
       Campaign snapshot:
       - Total shards: {{ fanouts.fuzzer.size }}
       - Completed shards: {{ fanouts.fuzzer.summary.completed }}
       - Failed shards: {{ fanouts.fuzzer.summary.failed }}
       - Silent shards: {{ fanouts.fuzzer.summary.without_output }}
-      - {{ target }} completed shards: {{ target_completed | length }}
-      - {{ target }} failed shards: {{ target_failed | length }}
-      - {{ target }} shards with output: {{ target_outputs | length }}
+      - {{ current.target }} completed shards: {{ target_completed | length }}
+      - {{ current.target }} failed shards: {{ target_failed | length }}
+      - {{ current.target }} shards with output: {{ target_outputs | length }}
 
-      Focus only on {{ target }}. Summarize strong or confirmed findings first, then recurring lessons, then quiet or failed shards that need retargeting.
+      Focus only on {{ current.target }}. Summarize strong or confirmed findings first, then recurring lessons, then quiet or failed shards that need retargeting.
 
       {% for shard in target_outputs %}
       ### {{ shard.label }} :: {{ shard.id }} (status: {{ shard.status }})
@@ -290,13 +291,13 @@ nodes:
 
       {% endfor %}
       {% if target_failed %}
-      Failed {{ target }} shards:
+      Failed {{ current.target }} shards:
       {% for shard in target_failed %}
       - {{ shard.id }} :: {{ shard.label }}
       {% endfor %}
       {% endif %}
       {% if not target_outputs %}
-      No {{ target }} shard produced reducer-ready output. Say that explicitly and use the failed shard list to suggest retargeting.
+      No {{ current.target }} shard produced reducer-ready output. Say that explicitly and use the failed shard list to suggest retargeting.
       {% endif %}
 
   - id: merge
@@ -612,23 +613,21 @@ nodes:
     depends_on: [fuzzer]
     timeout_seconds: 300
     prompt: |
-      {% set target = "{{ family.target }}" %}
-      {% set corpus = "{{ family.corpus }}" %}
-      {% set target_completed = fanouts.fuzzer.completed.nodes | selectattr("target", "equalto", target) | list %}
-      {% set target_failed = fanouts.fuzzer.failed.nodes | selectattr("target", "equalto", target) | list %}
-      {% set target_outputs = fanouts.fuzzer.with_output.nodes | selectattr("target", "equalto", target) | list %}
-      Prepare the maintainer handoff for target family {{ target }} (corpus {{ corpus }}).
+      {% set target_completed = fanouts.fuzzer.completed.nodes | selectattr("target", "equalto", current.target) | list %}
+      {% set target_failed = fanouts.fuzzer.failed.nodes | selectattr("target", "equalto", current.target) | list %}
+      {% set target_outputs = fanouts.fuzzer.with_output.nodes | selectattr("target", "equalto", current.target) | list %}
+      Prepare the maintainer handoff for target family {{ current.target }} (corpus {{ current.corpus }}).
 
       Campaign snapshot:
       - Total shards: {{ fanouts.fuzzer.size }}
       - Completed shards: {{ fanouts.fuzzer.summary.completed }}
       - Failed shards: {{ fanouts.fuzzer.summary.failed }}
       - Silent shards: {{ fanouts.fuzzer.summary.without_output }}
-      - {{ target }} completed shards: {{ target_completed | length }}
-      - {{ target }} failed shards: {{ target_failed | length }}
-      - {{ target }} shards with output: {{ target_outputs | length }}
+      - {{ current.target }} completed shards: {{ target_completed | length }}
+      - {{ current.target }} failed shards: {{ target_failed | length }}
+      - {{ current.target }} shards with output: {{ target_outputs | length }}
 
-      Focus only on {{ target }}. Summarize strong or confirmed findings first, then recurring lessons, then quiet or failed shards that need retargeting.
+      Focus only on {{ current.target }}. Summarize strong or confirmed findings first, then recurring lessons, then quiet or failed shards that need retargeting.
 
       {% for shard in target_outputs %}
       ### {{ shard.label }} :: {{ shard.id }} (status: {{ shard.status }})
@@ -636,13 +635,13 @@ nodes:
 
       {% endfor %}
       {% if target_failed %}
-      Failed {{ target }} shards:
+      Failed {{ current.target }} shards:
       {% for shard in target_failed %}
       - {{ shard.id }} :: {{ shard.label }}
       {% endfor %}
       {% endif %}
       {% if not target_outputs %}
-      No {{ target }} shard produced reducer-ready output. Say that explicitly and use the failed shard list to suggest retargeting.
+      No {{ current.target }} shard produced reducer-ready output. Say that explicitly and use the failed shard list to suggest retargeting.
       {% endif %}
 
   - id: merge
@@ -819,6 +818,188 @@ nodes:
         concurrency=concurrency,
         suffix_start=_fanout_suffix(0, shards),
         suffix_end=_fanout_suffix(shards - 1, shards),
+    )
+    return RenderedBundledTemplate(yaml=rendered_yaml)
+
+
+def _render_codex_fuzz_batched_template(values: Mapping[str, str] | None = None) -> RenderedBundledTemplate:
+    template_name = "codex-fuzz-batched"
+    raw_values = dict(values or {})
+    allowed = {"shards", "batch_size", "concurrency", "name", "working_dir"}
+    _validate_template_settings(template_name, raw_values, allowed=allowed)
+
+    shards = _parse_positive_template_int(
+        template_name,
+        "shards",
+        raw_values.get("shards", str(_DEFAULT_FUZZ_BATCHED_SHARDS)),
+    )
+    batch_size = _parse_positive_template_int(
+        template_name,
+        "batch_size",
+        raw_values.get("batch_size", str(_DEFAULT_FUZZ_BATCHED_BATCH_SIZE)),
+    )
+    concurrency = _parse_positive_template_int(
+        template_name,
+        "concurrency",
+        raw_values.get("concurrency", str(_DEFAULT_FUZZ_BATCHED_CONCURRENCY)),
+    )
+    name = _template_string_value(
+        template_name,
+        "name",
+        raw_values.get("name"),
+        default=f"codex-fuzz-batched-{shards}",
+    )
+    working_dir = _template_string_value(
+        template_name,
+        "working_dir",
+        raw_values.get("working_dir"),
+        default=f"./codex_fuzz_batched_{shards}",
+    )
+    batch_count = max(1, (shards + batch_size - 1) // batch_size)
+
+    rendered_yaml = Template(
+        """# Configurable batched Codex fuzzing swarm
+#
+# This scaffold keeps the launch side as simple as the homogeneous swarm starter,
+# but inserts automatic batch reducers with `fanout.batches` so 128-shard runs do
+# not collapse into one unreadable final merge.
+#
+# Usage:
+#   agentflow init fuzz-batched.yaml --template codex-fuzz-batched
+#   agentflow init fuzz-batched-256.yaml --template codex-fuzz-batched --set shards=256 --set batch_size=32 --set concurrency=64
+#   agentflow inspect fuzz-batched.yaml --output summary
+#   agentflow run fuzz-batched.yaml --preflight never
+
+name: $name
+description: Configurable $shards-shard Codex fuzzing swarm with automatic $batch_count-way batched reducers via `fanout.batches`.
+working_dir: $working_dir
+concurrency: $concurrency
+
+nodes:
+  - id: init
+    agent: codex
+    tools: read_write
+    timeout_seconds: 60
+    prompt: |
+      Create the following directory structure silently if it does not already exist:
+        mkdir -p docs crashes locks
+      If crashes/README.md is missing or empty, create it with:
+        # Crash Registry
+        | Timestamp | Shard | Evidence | Artifact |
+        |---|---|---|---|
+      If docs/global_lessons.md is missing or empty, create it with:
+        # Shared Lessons
+        Use this file only for reusable campaign-wide notes.
+      Then respond with exactly: INIT_OK
+
+    success_criteria:
+      - kind: output_contains
+        value: INIT_OK
+
+  - id: fuzzer
+    fanout:
+      count: $shards
+      as: shard
+      derive:
+        workspace: agents/agent_{{ shard.suffix }}
+    agent: codex
+    model: gpt-5-codex
+    tools: read_write
+    depends_on: [init]
+    target:
+      kind: local
+      cwd: "{{ shard.workspace }}"
+    timeout_seconds: 3600
+    retries: 2
+    retry_backoff_seconds: 2
+    extra_args:
+      - "--search"
+      - "-c"
+      - 'model_reasoning_effort="high"'
+    prompt: |
+      You are Codex fuzz shard {{ shard.number }} of {{ shard.count }} in an authorized campaign.
+
+      Shared workspace:
+      - Root: {{ pipeline.working_dir }}
+      - Shard dir: {{ shard.workspace }}
+      - Crash registry: crashes/README.md
+      - Shared notes: docs/global_lessons.md
+
+      Shard contract:
+      - Own only files under {{ shard.workspace }} unless you are appending to the shared docs or crash registry with locking.
+      - Keep your inputs and notes deterministic so another engineer can replay them.
+      - Use shard id `{{ shard.suffix }}` to vary corpus slices, seeds, flags, or target areas.
+      - Focus on deep, high-signal failure modes rather than shallow lint or unit-test noise.
+      - When you confirm a real issue, copy the minimal reproducer into `crashes/` and append a one-line entry to the registry.
+      - When a target area looks exhausted, write concise lessons to `docs/`.
+      - Continue searching until timeout.
+
+  - id: batch_merge
+    fanout:
+      as: batch
+      batches:
+        from: fuzzer
+        size: $batch_size
+    agent: codex
+    model: gpt-5-codex
+    tools: read_only
+    depends_on: [fuzzer]
+    timeout_seconds: 300
+    prompt: |
+      Prepare the maintainer handoff for shard batch {{ current.number }} of {{ current.count }}.
+
+      Batch coverage:
+      - Source group: {{ current.source_group }}
+      - Total source shards: {{ current.source_count }}
+      - Batch size: {{ current.size }}
+      - Shard range: {{ current.start_number }} through {{ current.end_number }}
+      - Shard ids: {{ current.member_ids | join(", ") }}
+
+      Focus on confirmed crashers first, then recurring lessons, then quiet shards that need retargeting.
+
+      {% for shard in current.members %}
+      ### {{ shard.node_id }} (status: {{ nodes[shard.node_id].status }})
+      Workspace: {{ shard.workspace }}
+      {{ nodes[shard.node_id].output or "(no output)" }}
+
+      {% endfor %}
+
+  - id: merge
+    agent: codex
+    model: gpt-5-codex
+    tools: read_only
+    depends_on: [batch_merge]
+    timeout_seconds: 300
+    prompt: |
+      Consolidate this $shards-shard fuzzing campaign into a maintainer handoff.
+      Start with campaign-wide status, then the strongest batch-level findings, and end with quiet or failed shards that need retargeting.
+
+      Campaign status:
+      - Total shards: {{ fanouts.fuzzer.size }}
+      - Completed shards: {{ fanouts.fuzzer.summary.completed }}
+      - Failed shards: {{ fanouts.fuzzer.summary.failed }}
+      - Silent shards: {{ fanouts.fuzzer.summary.without_output }}
+      - Batch reducers completed: {{ fanouts.batch_merge.summary.completed }} / {{ fanouts.batch_merge.size }}
+
+      {% for batch in fanouts.batch_merge.with_output.nodes %}
+      ## Batch {{ batch.number }} :: {{ batch.start_number }}-{{ batch.end_number }} (status: {{ batch.status }})
+      {{ batch.output }}
+
+      {% endfor %}
+      {% if fanouts.batch_merge.without_output.size %}
+      Batch reducers needing attention:
+      {% for batch in fanouts.batch_merge.without_output.nodes %}
+      - {{ batch.id }} :: shards {{ batch.start_number }}-{{ batch.end_number }} (status: {{ batch.status }})
+      {% endfor %}
+      {% endif %}
+"""
+    ).substitute(
+        name=name,
+        shards=shards,
+        batch_size=batch_size,
+        batch_count=batch_count,
+        working_dir=working_dir,
+        concurrency=concurrency,
     )
     return RenderedBundledTemplate(yaml=rendered_yaml)
 
@@ -1154,6 +1335,38 @@ _BUNDLED_TEMPLATES = (
         support_files=(_FUZZ_CATALOG_SUPPORT_FILE,),
     ),
     BundledTemplate(
+        name="codex-fuzz-batched",
+        example_name="fuzz/codex-fuzz-batched.yaml",
+        description="Configurable Codex fuzz swarm that uses `fanout.batches` to create scoped batch reducers for large shard counts.",
+        parameters=(
+            BundledTemplateParameter(
+                name="shards",
+                description="Number of Codex fuzz workers to fan out.",
+                default=str(_DEFAULT_FUZZ_BATCHED_SHARDS),
+            ),
+            BundledTemplateParameter(
+                name="batch_size",
+                description="Number of shards each intermediate reducer should own.",
+                default=str(_DEFAULT_FUZZ_BATCHED_BATCH_SIZE),
+            ),
+            BundledTemplateParameter(
+                name="concurrency",
+                description="Maximum number of shards to run in parallel.",
+                default=str(_DEFAULT_FUZZ_BATCHED_CONCURRENCY),
+            ),
+            BundledTemplateParameter(
+                name="name",
+                description="Pipeline name override.",
+                default="codex-fuzz-batched-<shards>",
+            ),
+            BundledTemplateParameter(
+                name="working_dir",
+                description="Pipeline working directory override.",
+                default="./codex_fuzz_batched_<shards>",
+            ),
+        ),
+    ),
+    BundledTemplate(
         name="codex-fuzz-swarm",
         example_name="fuzz/fuzz_codex_32.yaml",
         description="Configurable Codex fuzz swarm scaffold; defaults to 32 shards and scales cleanly to larger campaigns.",
@@ -1209,6 +1422,7 @@ _BUNDLED_TEMPLATE_RENDERERS = {
     "codex-fuzz-hierarchical-manifest": _render_codex_fuzz_hierarchical_template,
     "codex-fuzz-matrix-manifest": _render_codex_fuzz_matrix_manifest_template,
     "codex-fuzz-catalog": _render_codex_fuzz_catalog_template,
+    "codex-fuzz-batched": _render_codex_fuzz_batched_template,
     "codex-fuzz-swarm": _render_codex_fuzz_swarm_template,
 }
 

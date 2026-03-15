@@ -581,6 +581,151 @@ def test_pipeline_validation_expands_grouped_fanout_nodes_and_group_dependencies
     assert pipeline.node_map["merge"].depends_on == ["family_merge_0", "family_merge_1"]
 
 
+def test_pipeline_validation_expands_batched_fanout_nodes_and_scoped_dependencies():
+    pipeline = PipelineSpec.model_validate(
+        {
+            "name": "fanout-batches-validation",
+            "working_dir": ".",
+            "nodes": [
+                {
+                    "id": "fuzz",
+                    "fanout": {
+                        "count": 5,
+                        "as": "shard",
+                        "derive": {
+                            "workspace": "agents/agent_{{ shard.suffix }}",
+                        },
+                    },
+                    "agent": "codex",
+                    "prompt": "fuzz {{ shard.number }} in {{ shard.workspace }}",
+                    "target": {
+                        "kind": "local",
+                        "cwd": "{{ shard.workspace }}",
+                    },
+                },
+                {
+                    "id": "batch_merge",
+                    "fanout": {
+                        "as": "batch",
+                        "batches": {
+                            "from": "fuzz",
+                            "size": 2,
+                        },
+                    },
+                    "agent": "codex",
+                    "depends_on": ["fuzz"],
+                    "prompt": "merge batch {{ batch.start_number }}-{{ batch.end_number }}",
+                },
+                {
+                    "id": "merge",
+                    "agent": "codex",
+                    "depends_on": ["batch_merge"],
+                    "prompt": "merge",
+                },
+            ],
+        }
+    )
+
+    assert pipeline.fanouts == {
+        "fuzz": ["fuzz_0", "fuzz_1", "fuzz_2", "fuzz_3", "fuzz_4"],
+        "batch_merge": ["batch_merge_0", "batch_merge_1", "batch_merge_2"],
+    }
+    assert [node.id for node in pipeline.nodes] == [
+        "fuzz_0",
+        "fuzz_1",
+        "fuzz_2",
+        "fuzz_3",
+        "fuzz_4",
+        "batch_merge_0",
+        "batch_merge_1",
+        "batch_merge_2",
+        "merge",
+    ]
+    assert pipeline.node_map["batch_merge_0"].prompt == "merge batch 1-2"
+    assert pipeline.node_map["batch_merge_1"].prompt == "merge batch 3-4"
+    assert pipeline.node_map["batch_merge_2"].prompt == "merge batch 5-5"
+    assert pipeline.node_map["batch_merge_0"].fanout_member == {
+        "index": 0,
+        "number": 1,
+        "count": 3,
+        "suffix": "0",
+        "value": {
+            "source_group": "fuzz",
+            "source_count": 5,
+            "size": 2,
+            "member_ids": ["fuzz_0", "fuzz_1"],
+            "members": [
+                {
+                    "index": 0,
+                    "number": 1,
+                    "count": 5,
+                    "suffix": "0",
+                    "value": 0,
+                    "template_id": "fuzz",
+                    "node_id": "fuzz_0",
+                    "workspace": "agents/agent_0",
+                },
+                {
+                    "index": 1,
+                    "number": 2,
+                    "count": 5,
+                    "suffix": "1",
+                    "value": 1,
+                    "template_id": "fuzz",
+                    "node_id": "fuzz_1",
+                    "workspace": "agents/agent_1",
+                },
+            ],
+            "start_index": 0,
+            "end_index": 1,
+            "start_number": 1,
+            "end_number": 2,
+            "start_suffix": "0",
+            "end_suffix": "1",
+        },
+        "template_id": "batch_merge",
+        "node_id": "batch_merge_0",
+        "source_group": "fuzz",
+        "source_count": 5,
+        "size": 2,
+        "member_ids": ["fuzz_0", "fuzz_1"],
+        "members": [
+            {
+                "index": 0,
+                "number": 1,
+                "count": 5,
+                "suffix": "0",
+                "value": 0,
+                "template_id": "fuzz",
+                "node_id": "fuzz_0",
+                "workspace": "agents/agent_0",
+            },
+            {
+                "index": 1,
+                "number": 2,
+                "count": 5,
+                "suffix": "1",
+                "value": 1,
+                "template_id": "fuzz",
+                "node_id": "fuzz_1",
+                "workspace": "agents/agent_1",
+            },
+        ],
+        "start_index": 0,
+        "end_index": 1,
+        "start_number": 1,
+        "end_number": 2,
+        "start_suffix": "0",
+        "end_suffix": "1",
+    }
+    assert pipeline.node_map["batch_merge_1"].fanout_member["member_ids"] == ["fuzz_2", "fuzz_3"]
+    assert pipeline.node_map["batch_merge_2"].fanout_member["member_ids"] == ["fuzz_4"]
+    assert pipeline.node_map["batch_merge_0"].depends_on == ["fuzz_0", "fuzz_1"]
+    assert pipeline.node_map["batch_merge_1"].depends_on == ["fuzz_2", "fuzz_3"]
+    assert pipeline.node_map["batch_merge_2"].depends_on == ["fuzz_4"]
+    assert pipeline.node_map["merge"].depends_on == ["batch_merge_0", "batch_merge_1", "batch_merge_2"]
+
+
 def test_pipeline_validation_expands_fanout_matrix_path_nodes_and_group_dependencies(tmp_path):
     manifests = tmp_path / "manifests"
     manifests.mkdir()
@@ -756,7 +901,7 @@ def test_pipeline_validation_expands_curated_fanout_matrix_nodes_and_group_depen
 def test_pipeline_validation_rejects_fanout_with_multiple_expansion_modes():
     with pytest.raises(
         ValueError,
-        match=r"fanout accepts exactly one of `count`, `values`, `values_path`, `matrix`, `matrix_path`, `group_by`",
+        match=r"fanout accepts exactly one of `count`, `values`, `values_path`, `matrix`, `matrix_path`, `group_by`, `batches`",
     ):
         PipelineSpec.model_validate(
             {
@@ -785,7 +930,7 @@ def test_pipeline_validation_rejects_fanout_with_mixed_inline_and_file_backed_mo
 
     with pytest.raises(
         ValueError,
-        match=r"fanout accepts exactly one of `count`, `values`, `values_path`, `matrix`, `matrix_path`, `group_by`",
+        match=r"fanout accepts exactly one of `count`, `values`, `values_path`, `matrix`, `matrix_path`, `group_by`, `batches`",
     ):
         PipelineSpec.model_validate(
             {
@@ -831,6 +976,30 @@ def test_pipeline_validation_rejects_grouped_fanout_with_unknown_source_group():
         )
 
 
+def test_pipeline_validation_rejects_batched_fanout_with_unknown_source_group():
+    with pytest.raises(ValueError, match=r"`fanout\.batches\.from` references unknown prior fanout group `fuzz`"):
+        PipelineSpec.model_validate(
+            {
+                "name": "bad-fanout-batches-source",
+                "working_dir": ".",
+                "nodes": [
+                    {
+                        "id": "batch_merge",
+                        "fanout": {
+                            "as": "batch",
+                            "batches": {
+                                "from": "fuzz",
+                                "size": 4,
+                            },
+                        },
+                        "agent": "codex",
+                        "prompt": "merge batch {{ batch.number }}",
+                    }
+                ],
+            }
+        )
+
+
 def test_pipeline_validation_rejects_grouped_fanout_with_missing_source_field():
     with pytest.raises(
         ValueError,
@@ -863,6 +1032,30 @@ def test_pipeline_validation_rejects_grouped_fanout_with_missing_source_field():
                         "depends_on": ["fuzz"],
                         "prompt": "merge {{ family.corpus }}",
                     },
+                ],
+            }
+        )
+
+
+def test_pipeline_validation_rejects_fanout_alias_that_shadows_current_runtime_context():
+    with pytest.raises(
+        ValueError,
+        match=r"`fanout\.as` uses a reserved template variable name; choose something other than `fanout`, `fanouts`, `nodes`, `pipeline`, or `current`",
+    ):
+        PipelineSpec.model_validate(
+            {
+                "name": "bad-fanout-alias-current",
+                "working_dir": ".",
+                "nodes": [
+                    {
+                        "id": "fuzz",
+                        "fanout": {
+                            "count": 2,
+                            "as": "current",
+                        },
+                        "agent": "codex",
+                        "prompt": "hi",
+                    }
                 ],
             }
         )

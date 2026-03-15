@@ -410,6 +410,43 @@ def test_init_command_prints_custom_codex_fuzz_swarm_template():
     assert "count: 128" in result.stdout
 
 
+def test_init_command_prints_codex_fuzz_batched_template():
+    result = runner.invoke(app, ["init", "--template", "codex-fuzz-batched"])
+
+    assert result.exit_code == 0
+    assert "\nname: codex-fuzz-batched-128\n" in f"\n{result.stdout}"
+    assert "batches:" in result.stdout
+    assert "size: 16" in result.stdout
+
+
+def test_init_command_prints_custom_codex_fuzz_batched_template():
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            "--template",
+            "codex-fuzz-batched",
+            "--set",
+            "shards=48",
+            "--set",
+            "batch_size=12",
+            "--set",
+            "concurrency=20",
+            "--set",
+            "name=custom-batched-48",
+            "--set",
+            "working_dir=./custom_batched",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "\nname: custom-batched-48\n" in f"\n{result.stdout}"
+    assert "working_dir: ./custom_batched" in result.stdout
+    assert "concurrency: 20" in result.stdout
+    assert "count: 48" in result.stdout
+    assert "size: 12" in result.stdout
+
+
 def test_init_command_prints_codex_fuzz_matrix_derived_template():
     result = runner.invoke(app, ["init", "--template", "codex-fuzz-matrix-derived"])
 
@@ -478,6 +515,8 @@ def test_templates_command_lists_bundled_templates():
         "(assets: `manifests/codex-fuzz-matrix-manifest-128.axes.yaml`; source: `examples/fuzz/codex-fuzz-matrix-manifest-128.yaml`; use: `agentflow init --template codex-fuzz-matrix-manifest-128`)\n"
         "- codex-fuzz-catalog: Configurable Codex fuzz campaign backed by a CSV shard catalog; defaults to 128 shards and keeps per-shard labels and workdirs in the manifest. "
         "(params: `shards=128`, `concurrency=32`, `name=codex-fuzz-catalog-<shards>`, `working_dir=./codex_fuzz_catalog_<shards>`; assets: `manifests/codex-fuzz-catalog.csv`; source: `examples/fuzz/codex-fuzz-catalog.yaml`; use: `agentflow init --template codex-fuzz-catalog`)\n"
+        "- codex-fuzz-batched: Configurable Codex fuzz swarm that uses `fanout.batches` to create scoped batch reducers for large shard counts. "
+        "(params: `shards=128`, `batch_size=16`, `concurrency=32`, `name=codex-fuzz-batched-<shards>`, `working_dir=./codex_fuzz_batched_<shards>`; source: `examples/fuzz/codex-fuzz-batched.yaml`; use: `agentflow init --template codex-fuzz-batched`)\n"
         "- codex-fuzz-swarm: Configurable Codex fuzz swarm scaffold; defaults to 32 shards and scales cleanly to larger campaigns. "
         "(params: `shards=32`, `concurrency=8`, `name=codex-fuzz-swarm-<shards>`, `working_dir=./codex_fuzz_swarm_<shards>`; source: `examples/fuzz/fuzz_codex_32.yaml`; use: `agentflow init --template codex-fuzz-swarm`)\n"
         "- codex-fuzz-swarm-128: 128-shard Codex fuzzing swarm with init, retries, per-shard workdirs, and a merge reducer. "

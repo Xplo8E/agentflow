@@ -35,6 +35,7 @@ agentflow init fuzz-hierarchical-128.yaml --template codex-fuzz-hierarchical-128
 agentflow init fuzz-matrix-manifest.yaml --template codex-fuzz-matrix-manifest
 agentflow init fuzz-matrix-manifest-128.yaml --template codex-fuzz-matrix-manifest --set bucket_count=8 --set concurrency=32
 agentflow init fuzz-catalog.yaml --template codex-fuzz-catalog
+agentflow init fuzz-batched.yaml --template codex-fuzz-batched
 agentflow init fuzz-swarm.yaml --template codex-fuzz-swarm
 agentflow init fuzz-128.yaml --template codex-fuzz-swarm --set shards=128 --set concurrency=32
 agentflow validate pipeline.yaml
@@ -62,6 +63,7 @@ Choose a starter:
 - `codex-fuzz-matrix-manifest` for heterogeneous campaigns whose reusable axes should live in a sidecar manifest
 - `codex-fuzz-matrix-manifest-128` for a fixed 128-shard manifest-backed reference
 - `codex-fuzz-catalog` for spreadsheet-friendly shard catalogs with explicit per-row metadata you cannot derive
+- `codex-fuzz-batched` for 128-shard homogeneous swarms that need automatic intermediate reducers
 - `codex-fuzz-swarm` for homogeneous shard swarms you resize with `--set shards=...`
 
 ## Example
@@ -237,8 +239,7 @@ nodes:
         - target: sqlite
     depends_on: [fuzzer]
     prompt: |
-      {% set target = "{{ family.target }}" %}
-      {% set target_outputs = fanouts.fuzzer.with_output.nodes | selectattr("target", "equalto", target) | list %}
+      {% set target_outputs = fanouts.fuzzer.with_output.nodes | selectattr("target", "equalto", current.target) | list %}
       Completed shards: {{ fanouts.fuzzer.summary.completed }}
       Failed shards: {{ fanouts.fuzzer.summary.failed }}
 
@@ -249,7 +250,7 @@ nodes:
       {% endfor %}
 ```
 
-When a later Jinja expression needs the fanout member itself, freeze it into a plain string first with a line such as `{% set target = "{{ family.target }}" %}` so fan-out expansion can rewrite the placeholder before runtime.
+When runtime Jinja needs the current fanout member itself, use `current.*`. It exposes the active node id, agent, dependencies, and lifted fanout metadata, so staged reducers can filter `fanouts.*` or index into `nodes[...]` without the older placeholder-freezing workaround.
 
 When those staged reducers should follow the unique metadata already present on another fanout, use `fanout.group_by` instead of maintaining a second reducer roster:
 
@@ -272,12 +273,41 @@ nodes:
     agent: codex
     depends_on: [fuzzer]
     prompt: |
-      {% set target = "{{ family.target }}" %}
-      {% set target_outputs = fanouts.fuzzer.with_output.nodes | selectattr("target", "equalto", target) | list %}
-      Reduce {{ target }} with {{ target_outputs | length }} ready shard outputs.
+      {% set target_outputs = fanouts.fuzzer.with_output.nodes | selectattr("target", "equalto", current.target) | list %}
+      Reduce {{ current.target }} with {{ target_outputs | length }} ready shard outputs.
 ```
 
 `fanout.group_by` preserves first-seen order from the source fanout, which makes hierarchical reducers easy to keep aligned with the underlying shard matrix without a duplicate family manifest. The bundled `codex-fuzz-hierarchical-grouped` scaffold uses this pattern and scales to 128 shards with `agentflow init fuzz-hierarchical-grouped-128.yaml --template codex-fuzz-hierarchical-grouped --set bucket_count=8 --set concurrency=32`.
+
+When a homogeneous swarm needs intermediate reducers without maintaining a second roster, use `fanout.batches`. Each batch reducer gets the scoped shard ids in `current.member_ids`, the static shard metadata in `current.members`, and automatically rewritten dependencies that point only at that batch's source shards:
+
+```yaml
+nodes:
+  - id: fuzzer
+    fanout:
+      count: 128
+      as: shard
+      derive:
+        workspace: "agents/agent_{{ shard.suffix }}"
+
+  - id: batch_merge
+    fanout:
+      as: batch
+      batches:
+        from: fuzzer
+        size: 16
+    depends_on: [fuzzer]
+    prompt: |
+      Reduce shards {{ current.start_number }} through {{ current.end_number }}.
+
+      {% for shard in current.members %}
+      ## {{ shard.node_id }} (status: {{ nodes[shard.node_id].status }})
+      {{ nodes[shard.node_id].output or "(no output)" }}
+
+      {% endfor %}
+```
+
+The bundled `codex-fuzz-batched` scaffold turns that into a ready-to-run 128-shard Codex reference and scales further with `agentflow init fuzz-batched-256.yaml --template codex-fuzz-batched --set shards=256 --set batch_size=32 --set concurrency=64`.
 
 When a mostly-regular matrix needs a few real-world adjustments, use `fanout.exclude` and `fanout.include` before moving all the way to a CSV catalog:
 
@@ -321,7 +351,7 @@ nodes:
       Fuzz {{ shard.target }} with {{ shard.sanitizer }} using seed {{ shard.seed }}.
 ```
 
-See `examples/codex-fanout-repo-sweep.yaml` for a bundled maintainer-friendly review template, `examples/fuzz/codex-fuzz-matrix.yaml` for a baseline `fanout.matrix` fuzz starter, `examples/fuzz/codex-fuzz-matrix-derived.yaml` for the corresponding `fanout.derive` pattern with reusable labels and workdirs, `examples/fuzz/codex-fuzz-matrix-curated.yaml` for the `fanout.exclude` / `fanout.include` pattern that tunes a matrix without a sidecar catalog, `examples/fuzz/codex-fuzz-matrix-128.yaml` for a 128-shard inline matrix reference, `examples/fuzz/codex-fuzz-hierarchical-grouped.yaml` for the staged-reducer scaffold that derives reducer families from the expanded shard fanout, `examples/fuzz/codex-fuzz-hierarchical-manifest.yaml` for the configurable staged-reducer scaffold with sidecar axes and family manifests, `examples/fuzz/codex-fuzz-hierarchical-128.yaml` for the fixed 128-shard staged reducer reference, `examples/fuzz/codex-fuzz-matrix-manifest.yaml` for the configurable manifest-backed scaffold, `examples/fuzz/codex-fuzz-matrix-manifest-128.yaml` for the fixed 128-shard manifest-backed reference, `examples/fuzz/codex-fuzz-catalog.yaml` for a 128-shard CSV-backed shard catalog, `examples/fuzz/fuzz_codex_32.yaml` for the default right-sized Codex fuzz swarm, and `examples/fuzz/fuzz_codex_128.yaml` for the fixed 128-shard homogeneous reference swarm. The fuzz starters are scaffoldable via `agentflow init --template codex-fuzz-matrix`, `agentflow init --template codex-fuzz-matrix-derived`, `agentflow init --template codex-fuzz-matrix-curated`, `agentflow init --template codex-fuzz-matrix-128`, `agentflow init fuzz-hierarchical-grouped.yaml --template codex-fuzz-hierarchical-grouped`, `agentflow init fuzz-hierarchical-grouped-128.yaml --template codex-fuzz-hierarchical-grouped --set bucket_count=8 --set concurrency=32`, `agentflow init fuzz-hierarchical.yaml --template codex-fuzz-hierarchical-manifest`, `agentflow init fuzz-hierarchical-128.yaml --template codex-fuzz-hierarchical-manifest --set bucket_count=8 --set concurrency=32`, `agentflow init --template codex-fuzz-hierarchical-128`, `agentflow init fuzz-matrix-manifest.yaml --template codex-fuzz-matrix-manifest`, `agentflow init fuzz-matrix-manifest-128.yaml --template codex-fuzz-matrix-manifest --set bucket_count=8 --set concurrency=32`, `agentflow init fuzz-catalog.yaml --template codex-fuzz-catalog`, `agentflow init --template codex-fuzz-swarm`, and `agentflow init --template codex-fuzz-swarm --set shards=128 --set concurrency=32`.
+See `examples/codex-fanout-repo-sweep.yaml` for a bundled maintainer-friendly review template, `examples/fuzz/codex-fuzz-matrix.yaml` for a baseline `fanout.matrix` fuzz starter, `examples/fuzz/codex-fuzz-matrix-derived.yaml` for the corresponding `fanout.derive` pattern with reusable labels and workdirs, `examples/fuzz/codex-fuzz-matrix-curated.yaml` for the `fanout.exclude` / `fanout.include` pattern that tunes a matrix without a sidecar catalog, `examples/fuzz/codex-fuzz-matrix-128.yaml` for a 128-shard inline matrix reference, `examples/fuzz/codex-fuzz-hierarchical-grouped.yaml` for the staged-reducer scaffold that derives reducer families from the expanded shard fanout, `examples/fuzz/codex-fuzz-hierarchical-manifest.yaml` for the configurable staged-reducer scaffold with sidecar axes and family manifests, `examples/fuzz/codex-fuzz-hierarchical-128.yaml` for the fixed 128-shard staged reducer reference, `examples/fuzz/codex-fuzz-matrix-manifest.yaml` for the configurable manifest-backed scaffold, `examples/fuzz/codex-fuzz-matrix-manifest-128.yaml` for the fixed 128-shard manifest-backed reference, `examples/fuzz/codex-fuzz-catalog.yaml` for a 128-shard CSV-backed shard catalog, `examples/fuzz/codex-fuzz-batched.yaml` for the batched 128-shard homogeneous reference, `examples/fuzz/fuzz_codex_32.yaml` for the default right-sized Codex fuzz swarm, and `examples/fuzz/fuzz_codex_128.yaml` for the fixed 128-shard homogeneous reference swarm. The fuzz starters are scaffoldable via `agentflow init --template codex-fuzz-matrix`, `agentflow init --template codex-fuzz-matrix-derived`, `agentflow init --template codex-fuzz-matrix-curated`, `agentflow init --template codex-fuzz-matrix-128`, `agentflow init fuzz-hierarchical-grouped.yaml --template codex-fuzz-hierarchical-grouped`, `agentflow init fuzz-hierarchical-grouped-128.yaml --template codex-fuzz-hierarchical-grouped --set bucket_count=8 --set concurrency=32`, `agentflow init fuzz-hierarchical.yaml --template codex-fuzz-hierarchical-manifest`, `agentflow init fuzz-hierarchical-128.yaml --template codex-fuzz-hierarchical-manifest --set bucket_count=8 --set concurrency=32`, `agentflow init --template codex-fuzz-hierarchical-128`, `agentflow init fuzz-matrix-manifest.yaml --template codex-fuzz-matrix-manifest`, `agentflow init fuzz-matrix-manifest-128.yaml --template codex-fuzz-matrix-manifest --set bucket_count=8 --set concurrency=32`, `agentflow init fuzz-catalog.yaml --template codex-fuzz-catalog`, `agentflow init fuzz-batched.yaml --template codex-fuzz-batched`, `agentflow init --template codex-fuzz-swarm`, and `agentflow init --template codex-fuzz-swarm --set shards=128 --set concurrency=32`.
 
 ## Docs
 

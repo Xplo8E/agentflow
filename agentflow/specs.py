@@ -81,10 +81,10 @@ _KIMI_ANTHROPIC_BASE_URL = "https://api.kimi.com/coding/"
 _LOCAL_KIMI_BOOTSTRAP_SHELL_INIT = ("command -v kimi >/dev/null 2>&1", "kimi")
 _LOCAL_BOOTSTRAP_TARGET_KEYS = ("shell", "shell_login", "shell_interactive", "shell_init")
 _FANOUT_ALIAS_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_FANOUT_RESERVED_CONTEXT_NAMES = {"fanout", "fanouts", "nodes", "pipeline"}
+_FANOUT_RESERVED_CONTEXT_NAMES = {"fanout", "fanouts", "nodes", "pipeline", "current"}
 _FANOUT_MEMBER_RESERVED_NAMES = {"index", "number", "count", "suffix", "value", "template_id", "node_id"}
 _FANOUT_TEMPLATE_PATTERN = re.compile(r"{{\s*(?P<expr>[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*}}")
-_FANOUT_EXPANSION_MODE_KEYS = ("count", "values", "values_path", "matrix", "matrix_path", "group_by")
+_FANOUT_EXPANSION_MODE_KEYS = ("count", "values", "values_path", "matrix", "matrix_path", "group_by", "batches")
 
 
 def _normalize_local_bootstrap(value: object) -> str | None:
@@ -474,6 +474,21 @@ class FanoutGroupBySpec(BaseModel):
         return normalized
 
 
+class FanoutBatchesSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    from_: str = Field(alias="from")
+    size: int = Field(gt=0)
+
+    @field_validator("from_")
+    @classmethod
+    def validate_source_group(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("`fanout.batches.from` must not be empty")
+        return normalized
+
+
 class FanoutSpec(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -568,7 +583,7 @@ class FanoutSpec(BaseModel):
         if normalized in _FANOUT_RESERVED_CONTEXT_NAMES:
             raise ValueError(
                 "`fanout.as` uses a reserved template variable name; choose something other than "
-                "`fanout`, `fanouts`, `nodes`, or `pipeline`"
+                "`fanout`, `fanouts`, `nodes`, `pipeline`, or `current`"
             )
         if not _FANOUT_ALIAS_PATTERN.fullmatch(normalized):
             raise ValueError("`fanout.as` must be a valid template variable name")
@@ -642,6 +657,7 @@ class NodeSpec(BaseModel):
     retry_backoff_seconds: float = Field(default=1.0, ge=0.0)
     fanout_group: str | None = Field(default=None, exclude=True)
     fanout_member: dict[str, Any] | None = Field(default=None, exclude=True)
+    fanout_dependencies: dict[str, list[str]] = Field(default_factory=dict, exclude=True)
 
     @model_validator(mode="after")
     def ensure_unique_dependencies(self) -> "NodeSpec":
@@ -782,6 +798,69 @@ def _resolve_grouped_fanout_members(
     return grouped_members
 
 
+def _resolve_batched_fanout_members(
+    batches: FanoutBatchesSpec,
+    *,
+    source_members: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    members = source_members.get(batches.from_)
+    if members is None:
+        raise ValueError(
+            f"`fanout.batches.from` references unknown prior fanout group `{batches.from_}`; "
+            "place the source fanout earlier in the pipeline"
+        )
+
+    batched_members: list[dict[str, Any]] = []
+    source_count = len(members)
+    for offset in range(0, source_count, batches.size):
+        batch_members = [dict(member) for member in members[offset : offset + batches.size]]
+        if not batch_members:
+            continue
+
+        member_ids: list[str] = []
+        for member in batch_members:
+            node_id = member.get("node_id")
+            if not isinstance(node_id, str) or not node_id:
+                raise ValueError(
+                    f"fanout group `{batches.from_}` does not expose `node_id`, so `fanout.batches` "
+                    "cannot derive reducer dependencies"
+                )
+            member_ids.append(node_id)
+
+        first = batch_members[0]
+        last = batch_members[-1]
+        batched_members.append(
+            {
+                "source_group": batches.from_,
+                "source_count": source_count,
+                "size": len(batch_members),
+                "member_ids": member_ids,
+                "members": batch_members,
+                "start_index": first["index"],
+                "end_index": last["index"],
+                "start_number": first["number"],
+                "end_number": last["number"],
+                "start_suffix": first["suffix"],
+                "end_suffix": last["suffix"],
+            }
+        )
+    return batched_members
+
+
+def _fanout_dependency_overrides(member: dict[str, Any]) -> dict[str, list[str]]:
+    source_group = member.get("source_group")
+    member_ids = member.get("member_ids")
+    if not isinstance(source_group, str) or not source_group:
+        return {}
+    if not isinstance(member_ids, list):
+        return {}
+
+    scoped_member_ids = [member_id for member_id in member_ids if isinstance(member_id, str) and member_id]
+    if not scoped_member_ids:
+        return {}
+    return {source_group: scoped_member_ids}
+
+
 def _fanout_iteration_context(template_id: str, fanout: FanoutSpec, index: int, value: Any) -> dict[str, Any]:
     member_count = fanout.member_count
     suffix = _fanout_suffix(index, member_count)
@@ -910,17 +989,24 @@ def _resolve_fanout_manifest_modes(raw_fanout: Any, *, base_dir: Path | None) ->
     return updated
 
 
-def _resolve_fanout_group_by_mode(raw_fanout: Any, *, source_members: dict[str, list[dict[str, Any]]]) -> Any:
+def _resolve_fanout_source_modes(raw_fanout: Any, *, source_members: dict[str, list[dict[str, Any]]]) -> Any:
     if not isinstance(raw_fanout, dict):
         return raw_fanout
 
     updated = dict(raw_fanout)
     raw_group_by = updated.pop("group_by", None)
-    if raw_group_by is None:
-        return updated
+    raw_batches = updated.pop("batches", None)
+    if raw_group_by is not None and raw_batches is not None:
+        joined = ", ".join(f"`{key}`" for key in _FANOUT_EXPANSION_MODE_KEYS)
+        raise ValueError(f"fanout accepts exactly one of {joined}")
 
-    group_by = FanoutGroupBySpec.model_validate(raw_group_by)
-    updated["values"] = _resolve_grouped_fanout_members(group_by, source_members=source_members)
+    if raw_group_by is not None:
+        group_by = FanoutGroupBySpec.model_validate(raw_group_by)
+        updated["values"] = _resolve_grouped_fanout_members(group_by, source_members=source_members)
+
+    if raw_batches is not None:
+        batches = FanoutBatchesSpec.model_validate(raw_batches)
+        updated["values"] = _resolve_batched_fanout_members(batches, source_members=source_members)
     return updated
 
 
@@ -944,6 +1030,9 @@ def _expand_fanout_node(node: dict[str, Any], fanout: FanoutSpec) -> tuple[list[
         expanded["id"] = member_id
         expanded["fanout_group"] = template_id
         expanded["fanout_member"] = dict(iteration_context["fanout"])
+        fanout_dependencies = _fanout_dependency_overrides(iteration_context["fanout"])
+        if fanout_dependencies:
+            expanded["fanout_dependencies"] = fanout_dependencies
         expanded_nodes.append(expanded)
         member_ids.append(member_id)
     return expanded_nodes, member_ids
@@ -960,9 +1049,15 @@ def _expand_fanout_dependencies(nodes: list[Any], fanouts: dict[str, list[str]])
             expanded_nodes.append(node)
             continue
         updated = dict(node)
+        dependency_overrides = updated.get("fanout_dependencies")
         rewritten: list[Any] = []
         for dependency in depends_on:
             if isinstance(dependency, str) and dependency in fanouts:
+                if isinstance(dependency_overrides, dict):
+                    scoped_members = dependency_overrides.get(dependency)
+                    if isinstance(scoped_members, list) and scoped_members:
+                        rewritten.extend(scoped_members)
+                        continue
                 rewritten.extend(fanouts[dependency])
                 continue
             rewritten.append(dependency)
@@ -1004,7 +1099,7 @@ def expand_compact_nodes(payload: dict[str, Any], *, base_dir: str | Path | None
             continue
         saw_fanout = True
         resolved_fanout = _resolve_fanout_manifest_modes(raw_fanout, base_dir=resolved_base_dir)
-        resolved_fanout = _resolve_fanout_group_by_mode(resolved_fanout, source_members=fanout_members)
+        resolved_fanout = _resolve_fanout_source_modes(resolved_fanout, source_members=fanout_members)
         fanout = FanoutSpec.model_validate(resolved_fanout)
         rendered_nodes, member_ids = _expand_fanout_node(node, fanout)
         fanouts[str(node.get("id"))] = member_ids

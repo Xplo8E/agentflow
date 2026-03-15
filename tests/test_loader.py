@@ -306,6 +306,65 @@ nodes:
     assert pipeline.node_map["family_merge_0"].depends_on == ["fuzz_0", "fuzz_1", "fuzz_2", "fuzz_3"]
 
 
+def test_load_pipeline_from_text_expands_batched_fanout_before_resolving_relative_cwds(tmp_path):
+    workspace = tmp_path / "workspace"
+    pipeline = load_pipeline_from_text(
+        """name: fanout-batches-loader
+working_dir: .
+nodes:
+  - id: fuzz
+    fanout:
+      count: 5
+      as: shard
+      derive:
+        workspace: agents/agent_{{ shard.suffix }}
+    agent: codex
+    prompt: shard {{ shard.number }} {{ shard.workspace }}
+    target:
+      kind: local
+      cwd: "{{ shard.workspace }}"
+  - id: batch_merge
+    fanout:
+      as: batch
+      batches:
+        from: fuzz
+        size: 2
+    agent: codex
+    depends_on: [fuzz]
+    prompt: batch {{ batch.start_number }}-{{ batch.end_number }} {{ batch.size }}
+    target:
+      kind: local
+      cwd: reducers/{{ batch.suffix }}
+""",
+        base_dir=workspace,
+    )
+
+    assert pipeline.fanouts == {
+        "fuzz": ["fuzz_0", "fuzz_1", "fuzz_2", "fuzz_3", "fuzz_4"],
+        "batch_merge": ["batch_merge_0", "batch_merge_1", "batch_merge_2"],
+    }
+    assert [node.id for node in pipeline.nodes] == [
+        "fuzz_0",
+        "fuzz_1",
+        "fuzz_2",
+        "fuzz_3",
+        "fuzz_4",
+        "batch_merge_0",
+        "batch_merge_1",
+        "batch_merge_2",
+    ]
+    assert pipeline.node_map["fuzz_0"].target.cwd == str((workspace / "agents" / "agent_0").resolve())
+    assert pipeline.node_map["batch_merge_0"].prompt == "batch 1-2 2"
+    assert pipeline.node_map["batch_merge_1"].prompt == "batch 3-4 2"
+    assert pipeline.node_map["batch_merge_2"].prompt == "batch 5-5 1"
+    assert pipeline.node_map["batch_merge_0"].target.cwd == str((workspace / "reducers" / "0").resolve())
+    assert pipeline.node_map["batch_merge_1"].target.cwd == str((workspace / "reducers" / "1").resolve())
+    assert pipeline.node_map["batch_merge_2"].target.cwd == str((workspace / "reducers" / "2").resolve())
+    assert pipeline.node_map["batch_merge_0"].depends_on == ["fuzz_0", "fuzz_1"]
+    assert pipeline.node_map["batch_merge_1"].depends_on == ["fuzz_2", "fuzz_3"]
+    assert pipeline.node_map["batch_merge_2"].depends_on == ["fuzz_4"]
+
+
 def test_load_pipeline_from_path_expands_fanout_values_path_before_resolving_relative_cwds(tmp_path):
     workspace = tmp_path / "workspace"
     manifests = workspace / "manifests"

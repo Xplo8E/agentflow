@@ -88,23 +88,21 @@ nodes:
     depends_on: [fuzzer]
     timeout_seconds: 300
     prompt: |
-      {% set target = "{{ family.target }}" %}
-      {% set corpus = "{{ family.corpus }}" %}
-      {% set target_completed = fanouts.fuzzer.completed.nodes | selectattr("target", "equalto", target) | list %}
-      {% set target_failed = fanouts.fuzzer.failed.nodes | selectattr("target", "equalto", target) | list %}
-      {% set target_outputs = fanouts.fuzzer.with_output.nodes | selectattr("target", "equalto", target) | list %}
-      Prepare the maintainer handoff for target family {{ target }} (corpus {{ corpus }}).
+      {% set target_completed = fanouts.fuzzer.completed.nodes | selectattr("target", "equalto", current.target) | list %}
+      {% set target_failed = fanouts.fuzzer.failed.nodes | selectattr("target", "equalto", current.target) | list %}
+      {% set target_outputs = fanouts.fuzzer.with_output.nodes | selectattr("target", "equalto", current.target) | list %}
+      Prepare the maintainer handoff for target family {{ current.target }} (corpus {{ current.corpus }}).
 
       Campaign snapshot:
       - Total shards: {{ fanouts.fuzzer.size }}
       - Completed shards: {{ fanouts.fuzzer.summary.completed }}
       - Failed shards: {{ fanouts.fuzzer.summary.failed }}
       - Silent shards: {{ fanouts.fuzzer.summary.without_output }}
-      - {{ target }} completed shards: {{ target_completed | length }}
-      - {{ target }} failed shards: {{ target_failed | length }}
-      - {{ target }} shards with output: {{ target_outputs | length }}
+      - {{ current.target }} completed shards: {{ target_completed | length }}
+      - {{ current.target }} failed shards: {{ target_failed | length }}
+      - {{ current.target }} shards with output: {{ target_outputs | length }}
 
-      Focus only on {{ target }}. Summarize strong or confirmed findings first, then recurring lessons, then quiet or failed shards that need retargeting.
+      Focus only on {{ current.target }}. Summarize strong or confirmed findings first, then recurring lessons, then quiet or failed shards that need retargeting.
 
       {% for shard in target_outputs %}
       ### {{ shard.label }} :: {{ shard.id }} (status: {{ shard.status }})
@@ -112,13 +110,13 @@ nodes:
 
       {% endfor %}
       {% if target_failed %}
-      Failed {{ target }} shards:
+      Failed {{ current.target }} shards:
       {% for shard in target_failed %}
       - {{ shard.id }} :: {{ shard.label }}
       {% endfor %}
       {% endif %}
       {% if not target_outputs %}
-      No {{ target }} shard produced reducer-ready output. Say that explicitly and use the failed shard list to suggest retargeting.
+      No {{ current.target }} shard produced reducer-ready output. Say that explicitly and use the failed shard list to suggest retargeting.
       {% endif %}
 
   - id: merge

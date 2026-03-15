@@ -36,7 +36,28 @@ def _fanout_has_output(member: dict[str, Any]) -> bool:
     return isinstance(output, str) and bool(output.strip())
 
 
-def build_render_context(pipeline: PipelineSpec, results: dict[str, NodeResult]) -> dict[str, Any]:
+def _current_node_context(node: NodeSpec) -> dict[str, Any]:
+    context: dict[str, Any] = {
+        "id": node.id,
+        "agent": node.agent.value,
+        "depends_on": list(node.depends_on),
+    }
+    if node.fanout_group:
+        context["fanout_group"] = node.fanout_group
+    if node.fanout_member:
+        for key, value in node.fanout_member.items():
+            if key in context:
+                continue
+            context[key] = value
+    return context
+
+
+def build_render_context(
+    pipeline: PipelineSpec,
+    results: dict[str, NodeResult],
+    *,
+    current_node: NodeSpec | None = None,
+) -> dict[str, Any]:
     nodes: dict[str, Any] = {}
     for node_id, result in results.items():
         nodes[node_id] = _node_result_context(result)
@@ -75,7 +96,10 @@ def build_render_context(pipeline: PipelineSpec, results: dict[str, NodeResult])
                 [member for member in member_nodes if member["status"] == status.value]
             )
         fanouts[group_id] = fanout_context
-    return {"pipeline": pipeline.model_dump(mode="json"), "nodes": nodes, "fanouts": fanouts}
+    context = {"pipeline": pipeline.model_dump(mode="json"), "nodes": nodes, "fanouts": fanouts}
+    if current_node is not None:
+        context["current"] = _current_node_context(current_node)
+    return context
 
 
 def render_node_prompt(
@@ -83,7 +107,7 @@ def render_node_prompt(
     node: NodeSpec,
     results: dict[str, NodeResult],
 ) -> str:
-    context = build_render_context(pipeline, results)
+    context = build_render_context(pipeline, results, current_node=node)
     prompt = render_template(node.prompt, context)
     skill_prelude = compile_skill_prelude(node.skills, pipeline.working_path)
     if skill_prelude:

@@ -44,6 +44,50 @@ def _fanout_pipeline(tmp_path: Path):
     )
 
 
+def _batched_pipeline(tmp_path: Path):
+    return load_pipeline_from_data(
+        {
+            "name": "batched-context",
+            "working_dir": str(tmp_path),
+            "nodes": [
+                {
+                    "id": "worker",
+                    "fanout": {
+                        "count": 3,
+                        "as": "shard",
+                        "derive": {
+                            "workspace": "agents/agent_{{ shard.suffix }}",
+                        },
+                    },
+                    "agent": "codex",
+                    "prompt": "worker {{ shard.number }}",
+                },
+                {
+                    "id": "batch_merge",
+                    "fanout": {
+                        "as": "batch",
+                        "batches": {
+                            "from": "worker",
+                            "size": 2,
+                        },
+                    },
+                    "agent": "codex",
+                    "depends_on": ["worker"],
+                    "prompt": (
+                        "batch={{ current.number }}/{{ current.count }} "
+                        "range={{ current.start_number }}-{{ current.end_number }} "
+                        "ids={{ current.member_ids | join(',') }} :: "
+                        "{% for shard in current.members %}"
+                        "{{ shard.node_id }}@{{ shard.workspace }}={{ nodes[shard.node_id].output or '(no output)' }};"
+                        "{% endfor %}"
+                    ),
+                },
+            ],
+        },
+        base_dir=tmp_path,
+    )
+
+
 def test_build_render_context_exposes_fanout_status_and_output_subsets(tmp_path: Path):
     pipeline = _fanout_pipeline(tmp_path)
     results = {
@@ -88,3 +132,156 @@ def test_render_node_prompt_can_use_fanout_summary_and_filtered_nodes(tmp_path: 
         "worker_0=libpng:ok libpng;"
         "worker_1=sqlite:retry sqlite;"
     )
+
+
+def test_build_render_context_exposes_current_node_metadata_for_runtime_reducers(tmp_path: Path):
+    pipeline = _batched_pipeline(tmp_path)
+    results = {
+        "worker_0": NodeResult(node_id="worker_0", status=NodeStatus.COMPLETED, output="alpha"),
+        "worker_1": NodeResult(node_id="worker_1", status=NodeStatus.FAILED, output="beta"),
+        "worker_2": NodeResult(node_id="worker_2", status=NodeStatus.COMPLETED, output=""),
+        "batch_merge_0": NodeResult(node_id="batch_merge_0"),
+        "batch_merge_1": NodeResult(node_id="batch_merge_1"),
+    }
+
+    context = build_render_context(pipeline, results, current_node=pipeline.node_map["batch_merge_0"])
+
+    assert context["current"] == {
+        "id": "batch_merge_0",
+        "agent": "codex",
+        "depends_on": ["worker_0", "worker_1"],
+        "fanout_group": "batch_merge",
+        "index": 0,
+        "number": 1,
+        "count": 2,
+        "suffix": "0",
+        "value": {
+            "source_group": "worker",
+            "source_count": 3,
+            "size": 2,
+            "member_ids": ["worker_0", "worker_1"],
+            "members": [
+                {
+                    "index": 0,
+                    "number": 1,
+                    "count": 3,
+                    "suffix": "0",
+                    "value": 0,
+                    "template_id": "worker",
+                    "node_id": "worker_0",
+                    "workspace": "agents/agent_0",
+                },
+                {
+                    "index": 1,
+                    "number": 2,
+                    "count": 3,
+                    "suffix": "1",
+                    "value": 1,
+                    "template_id": "worker",
+                    "node_id": "worker_1",
+                    "workspace": "agents/agent_1",
+                },
+            ],
+            "start_index": 0,
+            "end_index": 1,
+            "start_number": 1,
+            "end_number": 2,
+            "start_suffix": "0",
+            "end_suffix": "1",
+        },
+        "template_id": "batch_merge",
+        "node_id": "batch_merge_0",
+        "source_group": "worker",
+        "source_count": 3,
+        "size": 2,
+        "member_ids": ["worker_0", "worker_1"],
+        "members": [
+            {
+                "index": 0,
+                "number": 1,
+                "count": 3,
+                "suffix": "0",
+                "value": 0,
+                "template_id": "worker",
+                "node_id": "worker_0",
+                "workspace": "agents/agent_0",
+            },
+            {
+                "index": 1,
+                "number": 2,
+                "count": 3,
+                "suffix": "1",
+                "value": 1,
+                "template_id": "worker",
+                "node_id": "worker_1",
+                "workspace": "agents/agent_1",
+            },
+        ],
+        "start_index": 0,
+        "end_index": 1,
+        "start_number": 1,
+        "end_number": 2,
+        "start_suffix": "0",
+        "end_suffix": "1",
+    }
+
+
+def test_render_node_prompt_can_use_current_node_and_batch_members(tmp_path: Path):
+    pipeline = _batched_pipeline(tmp_path)
+    results = {
+        "worker_0": NodeResult(node_id="worker_0", status=NodeStatus.COMPLETED, output="alpha"),
+        "worker_1": NodeResult(node_id="worker_1", status=NodeStatus.FAILED, output="beta"),
+        "worker_2": NodeResult(node_id="worker_2", status=NodeStatus.COMPLETED, output=""),
+        "batch_merge_0": NodeResult(node_id="batch_merge_0"),
+        "batch_merge_1": NodeResult(node_id="batch_merge_1"),
+    }
+
+    rendered = render_node_prompt(pipeline, pipeline.node_map["batch_merge_0"], results)
+
+    assert rendered == (
+        "batch=1/2 range=1-2 ids=worker_0,worker_1 :: "
+        "worker_0@agents/agent_0=alpha;"
+        "worker_1@agents/agent_1=beta;"
+    )
+
+
+def test_current_node_context_preserves_runtime_identity_when_member_keys_conflict(tmp_path: Path):
+    pipeline = load_pipeline_from_data(
+        {
+            "name": "fanout-current-collision",
+            "working_dir": str(tmp_path),
+            "nodes": [
+                {
+                    "id": "worker",
+                    "fanout": {
+                        "as": "shard",
+                        "values": [
+                            {
+                                "id": "manifest-id",
+                                "agent": "manifest-agent",
+                                "depends_on": ["manifest-dependency"],
+                                "target": "libpng",
+                            }
+                        ],
+                    },
+                    "agent": "codex",
+                    "prompt": "worker {{ shard.target }}",
+                }
+            ],
+        },
+        base_dir=tmp_path,
+    )
+    results = {"worker_0": NodeResult(node_id="worker_0")}
+
+    context = build_render_context(pipeline, results, current_node=pipeline.node_map["worker_0"])
+
+    assert context["current"]["id"] == "worker_0"
+    assert context["current"]["agent"] == "codex"
+    assert context["current"]["depends_on"] == []
+    assert context["current"]["target"] == "libpng"
+    assert context["current"]["value"] == {
+        "id": "manifest-id",
+        "agent": "manifest-agent",
+        "depends_on": ["manifest-dependency"],
+        "target": "libpng",
+    }
