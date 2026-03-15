@@ -10,7 +10,7 @@ with DAG(
 ) as dag:
     codex_fuzz_campaign(
         preset="protocol-stack",
-        bucket_count=8,
+        shards=128,
         layout="grouped",
         campaign_label="protocol-stack",
     )

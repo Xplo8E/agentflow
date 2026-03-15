@@ -251,7 +251,7 @@ def test_airflow_like_dag_supports_grouped_fanout_helpers():
 def test_codex_fuzz_campaign_helpers_build_preset_backed_matrix_payload():
     payload = codex_fuzz_campaign_matrix(
         preset="browser-surface",
-        bucket_count=2,
+        shards=32,
         as_="shard",
         label_template="{{ shard.target }} :: {{ shard.bucket }}",
         derive={"campaign": "browser"},
@@ -275,7 +275,7 @@ def test_codex_fuzz_campaign_helpers_build_preset_backed_matrix_payload():
 def test_fanout_preset_helper_builds_native_preset_payload():
     payload = fanout_preset(
         "browser-surface",
-        bucket_count=2,
+        shards=32,
         as_="shard",
         derive={"campaign": "browser"},
         extra_axes={"lane": ["renderer"]},
@@ -287,7 +287,7 @@ def test_fanout_preset_helper_builds_native_preset_payload():
         "as": "shard",
         "preset": {
             "name": "browser-surface",
-            "bucket_count": 2,
+            "shards": 32,
             "extra_axes": {"lane": ["renderer"]},
         },
         "derive": {"campaign": "browser"},
@@ -296,9 +296,26 @@ def test_fanout_preset_helper_builds_native_preset_payload():
     }
 
 
+def test_fanout_preset_helper_still_accepts_bucket_count_payload():
+    payload = fanout_preset("browser-surface", bucket_count=2, as_="shard")
+
+    assert payload == {
+        "as": "shard",
+        "preset": {
+            "name": "browser-surface",
+            "bucket_count": 2,
+        },
+    }
+
+
 def test_codex_fuzz_campaign_helper_rejects_unknown_preset():
     with pytest.raises(ValueError, match=r"`preset` must be one of"):
         codex_fuzz_campaign_matrix(preset="missing-preset")
+
+
+def test_codex_fuzz_campaign_helper_rejects_incompatible_shard_count():
+    with pytest.raises(ValueError, match=r"`shards` must be a multiple of 16"):
+        codex_fuzz_campaign_matrix(preset="browser-surface", shards=24)
 
 
 def test_airflow_like_dag_supports_preset_fanout_helper():
@@ -323,7 +340,7 @@ def test_airflow_like_dag_supports_preset_fanout_helper():
             prompt="fuzz {{ shard.label }} in {{ shard.workspace }}",
             fanout=fanout_preset(
                 preset="browser-surface",
-                bucket_count=1,
+                shards=32,
                 as_="shard",
                 extra_axes={"lane": ["renderer", "sandbox"]},
                 derive={
@@ -381,7 +398,7 @@ def test_airflow_like_dag_supports_codex_fuzz_campaign_matrix_helper():
             prompt="fuzz {{ shard.label }} in {{ shard.workspace }}",
             fanout=codex_fuzz_campaign_matrix(
                 preset="browser-surface",
-                bucket_count=2,
+                shards=32,
                 as_="shard",
             ),
             target={"cwd": "{{ shard.workspace }}"},
@@ -416,7 +433,7 @@ def test_codex_fuzz_campaign_registers_batched_pipeline_with_defaults():
     with DAG("campaign-helper", working_dir="/tmp/campaign-helper", concurrency=16, fail_fast=True) as dag:
         campaign = codex_fuzz_campaign(
             preset="browser-surface",
-            bucket_count=2,
+            shards=32,
             layout="batched",
             batch_size=4,
         )
@@ -434,7 +451,7 @@ def test_codex_fuzz_campaign_registers_batched_pipeline_with_defaults():
     assert len(spec.fanouts["fuzzer"]) == 32
     assert len(spec.fanouts["batch_merge"]) == 8
     assert payload["nodes"][1]["fanout"]["preset"]["name"] == "browser-surface"
-    assert payload["nodes"][1]["fanout"]["preset"]["bucket_count"] == 2
+    assert payload["nodes"][1]["fanout"]["preset"]["shards"] == 32
     assert "matrix" not in payload["nodes"][1]["fanout"]
     assert nodes["init"].tools == "read_write"
     assert nodes["init"].success_criteria[0].value == "INIT_OK"
@@ -450,7 +467,7 @@ def test_codex_fuzz_campaign_supports_grouped_layout_and_prefix_overrides():
     with DAG("campaign-helper-grouped", working_dir="/tmp/campaign-helper-grouped", concurrency=8) as dag:
         campaign = codex_fuzz_campaign(
             preset="protocol-stack",
-            bucket_count=1,
+            shards=16,
             layout="grouped",
             task_prefix="protocol",
             campaign_label="protocol-stack",
@@ -481,7 +498,7 @@ def test_codex_fuzz_campaign_uses_custom_shared_paths_in_init_and_fuzzer_prompts
     with DAG("campaign-helper-paths", working_dir="/tmp/campaign-helper-paths") as dag:
         campaign = codex_fuzz_campaign(
             preset="browser-surface",
-            bucket_count=1,
+            shards=16,
             layout="flat",
             crash_registry_path="reports/crashes.md",
             notes_path="notes/campaign.md",
@@ -744,3 +761,27 @@ def test_airflow_like_fuzz_campaign_helper_example_emits_valid_pipeline():
     )
     assert spec.node_map["family_merge_0"].depends_on == spec.fanouts["fuzzer"][:32]
     assert spec.node_map["merge"].depends_on == spec.fanouts["family_merge"]
+
+
+def test_airflow_like_fuzz_dual_campaigns_example_emits_valid_pipeline():
+    repo_root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [sys.executable, str(repo_root / "examples" / "airflow_like_fuzz_dual_campaigns.py")],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+    )
+
+    spec = load_pipeline_from_text(completed.stdout, base_dir=repo_root)
+
+    assert spec.name == "airflow-like-fuzz-dual-campaigns-128"
+    assert spec.fail_fast is True
+    assert spec.concurrency == 48
+    assert len(spec.fanouts["browser_fuzzer"]) == 64
+    assert len(spec.fanouts["protocol_fuzzer"]) == 64
+    assert len(spec.fanouts["browser_batch_merge"]) == 8
+    assert len(spec.fanouts["protocol_family_merge"]) == 4
+    assert spec.node_map["browser_fuzzer_00"].fanout_member["target"] == "blink"
+    assert spec.node_map["protocol_fuzzer_00"].fanout_member["target"] == "c-ares"
+    assert spec.node_map["maintainer_merge"].depends_on == ["browser_merge", "protocol_merge"]

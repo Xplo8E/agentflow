@@ -39,6 +39,7 @@ from agentflow.doctor import (
     build_local_smoke_doctor_report,
 )
 from agentflow.env import merge_env_layers
+from agentflow.fuzz_sizing import fuzz_campaign_preset_shard_multiple
 from agentflow.local_shell import (
     kimi_shell_init_requires_bash_warning,
     kimi_shell_init_requires_interactive_bash_warning,
@@ -1994,9 +1995,11 @@ def template_presets() -> None:
         strategy_summary = ", ".join(
             f"`{strategy['sanitizer']}/{strategy['focus']}`" for strategy in preset.strategies
         )
+        shard_multiple = fuzz_campaign_preset_shard_multiple(preset=preset)
         lines.append(
             f"- {preset.name}: {preset.description} "
-            f"(targets: {target_summary}; strategies: {strategy_summary})"
+            f"(targets: {target_summary}; strategies: {strategy_summary}; "
+            f"supported shard multiples via `shards=`: {shard_multiple}, {shard_multiple * 2}, {shard_multiple * 3}, ...)"
         )
 
     supported_templates = [

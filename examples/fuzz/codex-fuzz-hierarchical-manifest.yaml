@@ -7,8 +7,8 @@
 # Usage:
 #   agentflow template-presets
 #   agentflow init fuzz-hierarchical.yaml --template codex-fuzz-hierarchical-manifest
-#   agentflow init fuzz-browser-hierarchical-128.yaml --template codex-fuzz-hierarchical-manifest --set preset=browser-surface --set bucket_count=8 --set concurrency=32
-#   agentflow init fuzz-hierarchical-128.yaml --template codex-fuzz-hierarchical-manifest --set bucket_count=8 --set concurrency=32
+#   agentflow init fuzz-browser-hierarchical-128.yaml --template codex-fuzz-hierarchical-manifest --set preset=browser-surface --set shards=128 --set concurrency=32
+#   agentflow init fuzz-hierarchical-128.yaml --template codex-fuzz-hierarchical-manifest --set shards=128 --set concurrency=32
 #   agentflow inspect fuzz-hierarchical.yaml --output summary
 #   agentflow run fuzz-hierarchical.yaml --preflight never
 

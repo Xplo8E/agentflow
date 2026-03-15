@@ -565,19 +565,19 @@ def test_templates_command_lists_bundled_templates():
         "- codex-fuzz-hierarchical-128: 128-shard Codex fuzz matrix with per-target reducers that use fanout summaries to keep large merges readable. "
         "(source: `examples/fuzz/codex-fuzz-hierarchical-128.yaml`; use: `agentflow init --template codex-fuzz-hierarchical-128`)\n"
         "- codex-fuzz-hierarchical-grouped: Configurable hierarchical Codex fuzz matrix that uses `fanout.group_by` to derive reducer families from a selectable preset-backed shard fanout. "
-        "(params: `preset=oss-fuzz-core`, `bucket_count=4`, `concurrency=16`, `name=codex-fuzz-hierarchical-grouped-<shards>`, `working_dir=./codex_fuzz_hierarchical_grouped_<shards>`; assets: `manifests/codex-fuzz-hierarchical-grouped.axes.yaml`; source: `examples/fuzz/codex-fuzz-hierarchical-grouped.yaml`; use: `agentflow init --template codex-fuzz-hierarchical-grouped`)\n"
+        "(params: `preset=oss-fuzz-core`, `shards=64`, `concurrency=16`, `name=codex-fuzz-hierarchical-grouped-<shards>`, `working_dir=./codex_fuzz_hierarchical_grouped_<shards>`; assets: `manifests/codex-fuzz-hierarchical-grouped.axes.yaml`; source: `examples/fuzz/codex-fuzz-hierarchical-grouped.yaml`; use: `agentflow init --template codex-fuzz-hierarchical-grouped`)\n"
         "- codex-fuzz-hierarchical-manifest: Configurable hierarchical Codex fuzz matrix that keeps preset-backed reusable axes and reducer families in sidecar manifests. "
-        "(params: `preset=oss-fuzz-core`, `bucket_count=4`, `concurrency=16`, `name=codex-fuzz-hierarchical-manifest-<shards>`, `working_dir=./codex_fuzz_hierarchical_manifest_<shards>`; assets: `manifests/codex-fuzz-hierarchical.axes.yaml`, `manifests/codex-fuzz-hierarchical.families.yaml`; source: `examples/fuzz/codex-fuzz-hierarchical-manifest.yaml`; use: `agentflow init --template codex-fuzz-hierarchical-manifest`)\n"
+        "(params: `preset=oss-fuzz-core`, `shards=64`, `concurrency=16`, `name=codex-fuzz-hierarchical-manifest-<shards>`, `working_dir=./codex_fuzz_hierarchical_manifest_<shards>`; assets: `manifests/codex-fuzz-hierarchical.axes.yaml`, `manifests/codex-fuzz-hierarchical.families.yaml`; source: `examples/fuzz/codex-fuzz-hierarchical-manifest.yaml`; use: `agentflow init --template codex-fuzz-hierarchical-manifest`)\n"
         "- codex-fuzz-matrix-manifest: Configurable Codex fuzz matrix that keeps selectable preset-backed reusable axes in `fanout.matrix_path` and scales by rendering more seed buckets. "
-        "(params: `preset=oss-fuzz-core`, `bucket_count=4`, `concurrency=16`, `name=codex-fuzz-matrix-manifest-<shards>`, `working_dir=./codex_fuzz_matrix_manifest_<shards>`; assets: `manifests/codex-fuzz-matrix.axes.yaml`; source: `examples/fuzz/codex-fuzz-matrix-manifest.yaml`; use: `agentflow init --template codex-fuzz-matrix-manifest`)\n"
+        "(params: `preset=oss-fuzz-core`, `shards=64`, `concurrency=16`, `name=codex-fuzz-matrix-manifest-<shards>`, `working_dir=./codex_fuzz_matrix_manifest_<shards>`; assets: `manifests/codex-fuzz-matrix.axes.yaml`; source: `examples/fuzz/codex-fuzz-matrix-manifest.yaml`; use: `agentflow init --template codex-fuzz-matrix-manifest`)\n"
         "- codex-fuzz-matrix-manifest-128: 128-shard Codex fuzz matrix that loads its axes from `fanout.matrix_path` for easier maintainer edits. "
         "(assets: `manifests/codex-fuzz-matrix-manifest-128.axes.yaml`; source: `examples/fuzz/codex-fuzz-matrix-manifest-128.yaml`; use: `agentflow init --template codex-fuzz-matrix-manifest-128`)\n"
         "- codex-fuzz-browser-128: 128-shard browser-surface Codex fuzz matrix generated from the `browser-surface` preset. "
         "(assets: `manifests/codex-fuzz-browser-128.axes.yaml`; source: `examples/fuzz/codex-fuzz-browser-128.yaml`; use: `agentflow init --template codex-fuzz-browser-128`)\n"
         "- codex-fuzz-campaign: Configurable preset-backed Codex fuzz campaign scaffold powered by `codex_fuzz_campaign()` and selectable `flat`, `batched`, or `grouped` layouts. "
-        "(params: `preset=oss-fuzz-core`, `layout=batched`, `bucket_count=8`, `batch_size=16`, `concurrency=32`, `name=codex-fuzz-campaign-<preset>-<layout>-<shards>`, `working_dir=./codex_fuzz_campaign_<preset>_<layout>_<shards>`; source: `examples/fuzz/codex-fuzz-campaign.yaml`; use: `agentflow init --template codex-fuzz-campaign`)\n"
+        "(params: `preset=oss-fuzz-core`, `layout=batched`, `shards=128`, `batch_size=16`, `concurrency=32`, `name=codex-fuzz-campaign-<preset>-<layout>-<shards>`, `working_dir=./codex_fuzz_campaign_<preset>_<layout>_<shards>`; source: `examples/fuzz/codex-fuzz-campaign.yaml`; use: `agentflow init --template codex-fuzz-campaign`)\n"
         "- codex-fuzz-preset-batched: Configurable preset-backed Codex fuzz campaign that uses native `fanout.preset` plus `fanout.batches` to keep large 128-shard runs in one YAML file. "
-        "(params: `preset=oss-fuzz-core`, `bucket_count=8`, `batch_size=16`, `concurrency=32`, `name=codex-fuzz-preset-batched-<shards>`, `working_dir=./codex_fuzz_preset_batched_<shards>`; source: `examples/fuzz/codex-fuzz-preset-batched.yaml`; use: `agentflow init --template codex-fuzz-preset-batched`)\n"
+        "(params: `preset=oss-fuzz-core`, `shards=128`, `batch_size=16`, `concurrency=32`, `name=codex-fuzz-preset-batched-<shards>`, `working_dir=./codex_fuzz_preset_batched_<shards>`; source: `examples/fuzz/codex-fuzz-preset-batched.yaml`; use: `agentflow init --template codex-fuzz-preset-batched`)\n"
         "- codex-fuzz-catalog: Configurable Codex fuzz campaign backed by a preset-generated CSV shard catalog; defaults to 128 shards and keeps per-shard labels and workdirs in the manifest. "
         "(params: `preset=oss-fuzz-core`, `shards=128`, `concurrency=32`, `name=codex-fuzz-catalog-<shards>`, `working_dir=./codex_fuzz_catalog_<shards>`; assets: `manifests/codex-fuzz-catalog.csv`; source: `examples/fuzz/codex-fuzz-catalog.yaml`; use: `agentflow init --template codex-fuzz-catalog`)\n"
         "- codex-fuzz-catalog-batched: Configurable Codex fuzz campaign backed by a preset-generated CSV shard catalog with neutral `fanout.batches` reducers for large explicit shard rosters. "
@@ -606,11 +606,11 @@ def test_template_presets_command_lists_bundled_presets():
     assert result.stdout == (
         "Bundled template presets:\n"
         "- oss-fuzz-core: Balanced native parser campaign across media, fonts, and storage surfaces. "
-        "(targets: `libpng/png`, `libjpeg/jpeg`, `freetype/fonts`, `sqlite/sql`; strategies: `asan/parser`, `asan/structure-aware`, `ubsan/differential`, `ubsan/stateful`)\n"
+        "(targets: `libpng/png`, `libjpeg/jpeg`, `freetype/fonts`, `sqlite/sql`; strategies: `asan/parser`, `asan/structure-aware`, `ubsan/differential`, `ubsan/stateful`; supported shard multiples via `shards=`: 16, 32, 48, ...)\n"
         "- browser-surface: Browser-adjacent HTML, JS, font, and image surfaces for renderer-oriented campaigns. "
-        "(targets: `blink/html`, `v8/js`, `woff2/fonts`, `libwebp/webp`; strategies: `asan/parser`, `asan/structure-aware`, `ubsan/differential`, `ubsan/stateful`)\n"
+        "(targets: `blink/html`, `v8/js`, `woff2/fonts`, `libwebp/webp`; strategies: `asan/parser`, `asan/structure-aware`, `ubsan/differential`, `ubsan/stateful`; supported shard multiples via `shards=`: 16, 32, 48, ...)\n"
         "- protocol-stack: Protocol and transport libraries across DNS, HTTP/2, QUIC, and TLS inputs. "
-        "(targets: `c-ares/dns`, `nghttp2/http2`, `quiche/quic`, `openssl/tls`; strategies: `asan/parser`, `asan/structure-aware`, `ubsan/differential`, `ubsan/stateful`)\n"
+        "(targets: `c-ares/dns`, `nghttp2/http2`, `quiche/quic`, `openssl/tls`; strategies: `asan/parser`, `asan/structure-aware`, `ubsan/differential`, `ubsan/stateful`; supported shard multiples via `shards=`: 16, 32, 48, ...)\n"
         "Templates supporting `preset=`: `codex-fuzz-hierarchical-grouped`, `codex-fuzz-hierarchical-manifest`, `codex-fuzz-matrix-manifest`, `codex-fuzz-campaign`, `codex-fuzz-preset-batched`, `codex-fuzz-catalog`, `codex-fuzz-catalog-batched`, `codex-fuzz-catalog-grouped`\n"
     )
 
@@ -671,7 +671,7 @@ def test_init_command_writes_selected_template_and_support_files_to_destination(
             "--template",
             "codex-fuzz-matrix-manifest",
             "--set",
-            "bucket_count=8",
+            "shards=128",
             "--set",
             "concurrency=32",
             "--set",
@@ -706,7 +706,7 @@ def test_init_command_writes_preset_rendered_template_and_support_files_to_desti
             "--set",
             "preset=browser-surface",
             "--set",
-            "bucket_count=8",
+            "shards=128",
             "--set",
             "concurrency=32",
             "--set",
@@ -758,7 +758,7 @@ def test_init_command_writes_preset_batched_template_to_destination(tmp_path):
             "--set",
             "preset=protocol-stack",
             "--set",
-            "bucket_count=3",
+            "shards=48",
             "--set",
             "batch_size=6",
             "--set",
@@ -776,7 +776,7 @@ def test_init_command_writes_preset_batched_template_to_destination(tmp_path):
     assert "\nname: custom-preset-batched-48\n" in f"\n{rendered_yaml}"
     assert "concurrency: 12" in rendered_yaml
     assert "name: protocol-stack" in rendered_yaml
-    assert "bucket_count: 3" in rendered_yaml
+    assert "shards: 48" in rendered_yaml
     assert "size: 6" in rendered_yaml
 
 
@@ -795,7 +795,7 @@ def test_init_command_writes_codex_fuzz_campaign_template_to_destination(tmp_pat
             "--set",
             "layout=grouped",
             "--set",
-            "bucket_count=2",
+            "shards=32",
             "--set",
             "concurrency=12",
             "--set",
@@ -811,11 +811,36 @@ def test_init_command_writes_codex_fuzz_campaign_template_to_destination(tmp_pat
     assert "\nname: browser-campaign-grouped-32\n" in f"\n{rendered_yaml}"
     assert "concurrency: 12" in rendered_yaml
     assert "name: browser-surface" in rendered_yaml
-    assert "bucket_count: 2" in rendered_yaml
+    assert "shards: 32" in rendered_yaml
     assert "group_by:" in rendered_yaml
     assert "fields:" in rendered_yaml
     assert "- target" in rendered_yaml
     assert "- corpus" in rendered_yaml
+
+
+def test_init_command_still_accepts_legacy_bucket_count_for_codex_fuzz_campaign(tmp_path):
+    destination = tmp_path / "templates" / "fuzz-campaign-bucket-count.yaml"
+
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            str(destination),
+            "--template",
+            "codex-fuzz-campaign",
+            "--set",
+            "preset=browser-surface",
+            "--set",
+            "layout=grouped",
+            "--set",
+            "bucket_count=2",
+        ],
+    )
+
+    assert result.exit_code == 0
+    rendered_yaml = destination.read_text(encoding="utf-8")
+    assert "name: browser-surface" in rendered_yaml
+    assert "shards: 32" in rendered_yaml
 
 
 def test_init_command_writes_hierarchical_template_and_support_files_to_destination(tmp_path):
@@ -829,7 +854,7 @@ def test_init_command_writes_hierarchical_template_and_support_files_to_destinat
             "--template",
             "codex-fuzz-hierarchical-manifest",
             "--set",
-            "bucket_count=8",
+            "shards=128",
             "--set",
             "concurrency=32",
             "--set",
@@ -875,7 +900,7 @@ def test_init_command_writes_grouped_hierarchical_template_and_support_files_to_
             "--template",
             "codex-fuzz-hierarchical-grouped",
             "--set",
-            "bucket_count=8",
+            "shards=128",
             "--set",
             "concurrency=32",
             "--set",

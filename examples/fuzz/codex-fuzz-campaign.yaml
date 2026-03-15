@@ -52,7 +52,7 @@ nodes:
     as: shard
     preset:
       name: oss-fuzz-core
-      bucket_count: 8
+      shards: 128
       label_template: '{{ shard.target }} / {{ shard.sanitizer }} / {{ shard.focus
         }} / {{ shard.bucket }}'
       workspace_template: agents/{{ shard.target }}_{{ shard.sanitizer }}_{{ shard.bucket

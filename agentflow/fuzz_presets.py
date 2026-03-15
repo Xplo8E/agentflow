@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from agentflow.defaults import bundled_fuzz_campaign_presets, default_fuzz_campaign_preset_name
+from agentflow.fuzz_sizing import resolve_fuzz_campaign_bucket_count
 
 _DEFAULT_BUCKET_COUNT = 4
 _DEFAULT_SEED_START = 4101
@@ -53,7 +54,8 @@ def _positive_int(value: int, *, field_name: str) -> int:
 def build_codex_fuzz_campaign_matrix_payload(
     *,
     preset: str | None = None,
-    bucket_count: int = _DEFAULT_BUCKET_COUNT,
+    shards: int | None = None,
+    bucket_count: int | None = None,
     label_template: str | None = _DEFAULT_LABEL_TEMPLATE,
     workspace_template: str | None = _DEFAULT_WORKSPACE_TEMPLATE,
     seed_start: int = _DEFAULT_SEED_START,
@@ -70,10 +72,16 @@ def build_codex_fuzz_campaign_matrix_payload(
     by_name = {item.name: item for item in bundled_fuzz_campaign_presets()}
     campaign_preset = by_name[resolved_preset_name]
 
-    bucket_count = _positive_int(bucket_count, field_name="bucket_count")
     seed_label_width = _positive_int(seed_label_width, field_name="seed_label_width")
     if isinstance(seed_start, bool) or not isinstance(seed_start, int):
         raise ValueError("`seed_start` must be an integer")
+    resolved_bucket_count, _, _ = resolve_fuzz_campaign_bucket_count(
+        preset=campaign_preset,
+        default_bucket_count=_DEFAULT_BUCKET_COUNT,
+        bucket_count=bucket_count,
+        shards=shards,
+        extra_axes=extra_axes,
+    )
 
     matrix: dict[str, list[Any]] = {
         "family": [dict(family) for family in campaign_preset.families],
@@ -83,7 +91,7 @@ def build_codex_fuzz_campaign_matrix_payload(
                 "bucket": f"{seed_label_prefix}{index + 1:0{seed_label_width}d}",
                 "seed": seed_start + index,
             }
-            for index in range(bucket_count)
+            for index in range(resolved_bucket_count)
         ],
     }
 

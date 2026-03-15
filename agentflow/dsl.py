@@ -254,6 +254,7 @@ def fanout_preset(
     preset: str | None = None,
     *,
     as_: str = "item",
+    shards: int | None = None,
     bucket_count: int | None = None,
     label_template: str | None = None,
     workspace_template: str | None = None,
@@ -268,6 +269,8 @@ def fanout_preset(
     preset_payload: dict[str, Any] = {}
     if preset is not None:
         preset_payload["name"] = preset
+    if shards is not None:
+        preset_payload["shards"] = shards
     if bucket_count is not None:
         preset_payload["bucket_count"] = bucket_count
     if label_template is not None:

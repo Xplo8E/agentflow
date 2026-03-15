@@ -1009,7 +1009,7 @@ def test_pipeline_validation_expands_fanout_preset_nodes_and_group_dependencies(
                         "as": "shard",
                         "preset": {
                             "name": "browser-surface",
-                            "bucket_count": 2,
+                            "shards": 32,
                             "extra_axes": {
                                 "lane": ["renderer"]
                             },

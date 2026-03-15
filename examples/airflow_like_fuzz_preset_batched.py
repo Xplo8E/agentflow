@@ -47,7 +47,7 @@ with DAG(
         task_id="fuzzer",
         fanout=fanout_preset(
             preset="browser-surface",
-            bucket_count=8,
+            shards=128,
             as_="shard",
         ),
         tools="read_write",

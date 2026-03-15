@@ -49,7 +49,7 @@ def test_bundled_templates_expose_descriptions_and_example_files():
     )
     assert tuple(parameter.name for parameter in by_name["codex-fuzz-hierarchical-grouped"].parameters) == (
         "preset",
-        "bucket_count",
+        "shards",
         "concurrency",
         "name",
         "working_dir",
@@ -62,7 +62,7 @@ def test_bundled_templates_expose_descriptions_and_example_files():
     )
     assert tuple(parameter.name for parameter in by_name["codex-fuzz-hierarchical-manifest"].parameters) == (
         "preset",
-        "bucket_count",
+        "shards",
         "concurrency",
         "name",
         "working_dir",
@@ -72,7 +72,7 @@ def test_bundled_templates_expose_descriptions_and_example_files():
     assert by_name["codex-fuzz-matrix-manifest"].support_files == ("manifests/codex-fuzz-matrix.axes.yaml",)
     assert tuple(parameter.name for parameter in by_name["codex-fuzz-matrix-manifest"].parameters) == (
         "preset",
-        "bucket_count",
+        "shards",
         "concurrency",
         "name",
         "working_dir",
@@ -90,7 +90,7 @@ def test_bundled_templates_expose_descriptions_and_example_files():
     assert tuple(parameter.name for parameter in by_name["codex-fuzz-campaign"].parameters) == (
         "preset",
         "layout",
-        "bucket_count",
+        "shards",
         "batch_size",
         "concurrency",
         "name",
@@ -100,7 +100,7 @@ def test_bundled_templates_expose_descriptions_and_example_files():
     assert "fanout.preset" in by_name["codex-fuzz-preset-batched"].description
     assert tuple(parameter.name for parameter in by_name["codex-fuzz-preset-batched"].parameters) == (
         "preset",
-        "bucket_count",
+        "shards",
         "batch_size",
         "concurrency",
         "name",
@@ -373,7 +373,7 @@ def test_bundled_codex_fuzz_hierarchical_grouped_template_accepts_overrides_and_
     rendered = render_bundled_template(
         "codex-fuzz-hierarchical-grouped",
         values={
-            "bucket_count": "8",
+            "shards": "128",
             "concurrency": "32",
             "name": "custom-hierarchical-grouped-128",
             "working_dir": "./custom_hierarchical_grouped",
@@ -458,7 +458,7 @@ def test_bundled_codex_fuzz_hierarchical_manifest_template_accepts_overrides_and
     rendered = render_bundled_template(
         "codex-fuzz-hierarchical-manifest",
         values={
-            "bucket_count": "8",
+            "shards": "128",
             "concurrency": "32",
             "name": "custom-hierarchical-manifest-128",
             "working_dir": "./custom_hierarchical_manifest",
@@ -542,7 +542,7 @@ def test_bundled_codex_fuzz_matrix_manifest_template_accepts_overrides_and_rende
     rendered = render_bundled_template(
         "codex-fuzz-matrix-manifest",
         values={
-            "bucket_count": "8",
+            "shards": "128",
             "concurrency": "32",
             "name": "custom-matrix-manifest-128",
             "working_dir": "./custom_matrix_manifest",
@@ -583,7 +583,7 @@ def test_bundled_codex_fuzz_matrix_manifest_template_accepts_preset_overrides(tm
         "codex-fuzz-matrix-manifest",
         values={
             "preset": "browser-surface",
-            "bucket_count": "8",
+            "shards": "128",
             "concurrency": "32",
             "name": "browser-fuzz-128",
             "working_dir": "./browser_fuzz",
@@ -658,7 +658,7 @@ def test_bundled_codex_fuzz_campaign_template_accepts_grouped_overrides(tmp_path
         values={
             "preset": "browser-surface",
             "layout": "grouped",
-            "bucket_count": "2",
+            "shards": "32",
             "concurrency": "10",
             "name": "browser-campaign-grouped-32",
             "working_dir": "./browser_campaign_grouped",
@@ -703,7 +703,7 @@ def test_bundled_codex_fuzz_preset_batched_template_accepts_overrides_and_expand
         "codex-fuzz-preset-batched",
         values={
             "preset": "protocol-stack",
-            "bucket_count": "3",
+            "shards": "48",
             "batch_size": "6",
             "concurrency": "12",
             "name": "custom-preset-batched-48",
@@ -715,7 +715,7 @@ def test_bundled_codex_fuzz_preset_batched_template_accepts_overrides_and_expand
     assert "working_dir: ./custom_preset_batched\n" in rendered
     assert "concurrency: 12\n" in rendered
     assert "name: protocol-stack" in rendered
-    assert "bucket_count: 3" in rendered
+    assert "shards: 48" in rendered
     assert "size: 6" in rendered
     assert "Treat the built-in preset metadata as the source of truth" in rendered
     assert "{{ current.scope.ids | join(\", \") }}" in rendered
@@ -752,6 +752,19 @@ def test_bundled_codex_fuzz_preset_batched_template_accepts_overrides_and_expand
         "fuzzer_05",
     ]
     assert pipeline.node_map["merge"].depends_on == pipeline.fanouts["batch_merge"]
+
+
+def test_bundled_codex_fuzz_preset_batched_template_still_accepts_bucket_count_override():
+    rendered = load_bundled_template_yaml(
+        "codex-fuzz-preset-batched",
+        values={
+            "preset": "protocol-stack",
+            "bucket_count": "3",
+        },
+    )
+
+    assert "name: codex-fuzz-preset-batched-48\n" in rendered
+    assert "shards: 48" in rendered
 
 
 def test_bundled_codex_fuzz_catalog_template_is_available():

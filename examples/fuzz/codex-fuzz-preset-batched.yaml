@@ -9,7 +9,7 @@
 #   agentflow template-presets
 #   agentflow init fuzz-preset-batched.yaml --template codex-fuzz-preset-batched
 #   agentflow init fuzz-browser-inline.yaml --template codex-fuzz-preset-batched --set preset=browser-surface
-#   agentflow init fuzz-protocol-256.yaml --template codex-fuzz-preset-batched --set preset=protocol-stack --set bucket_count=16 --set batch_size=32 --set concurrency=64
+#   agentflow init fuzz-protocol-256.yaml --template codex-fuzz-preset-batched --set preset=protocol-stack --set shards=256 --set batch_size=32 --set concurrency=64
 #   agentflow inspect fuzz-preset-batched.yaml --output summary
 #   agentflow run fuzz-preset-batched.yaml --preflight never
 
@@ -44,7 +44,7 @@ nodes:
       as: shard
       preset:
         name: oss-fuzz-core
-        bucket_count: 8
+        shards: 128
     agent: codex
     model: gpt-5-codex
     tools: read_write

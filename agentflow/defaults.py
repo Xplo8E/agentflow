@@ -7,6 +7,8 @@ from pathlib import Path
 from string import Template
 from typing import Mapping
 
+from agentflow.fuzz_sizing import resolve_fuzz_campaign_bucket_count
+
 
 @dataclass(frozen=True)
 class BundledTemplateParameter:
@@ -196,6 +198,38 @@ def _fuzz_campaign_total_shards(bucket_count: int, *, preset: BundledFuzzCampaig
     return len(preset.families) * len(preset.strategies) * bucket_count
 
 
+def _resolve_preset_template_shard_sizing(
+    template_name: str,
+    raw_values: Mapping[str, str],
+    *,
+    preset: BundledFuzzCampaignPreset,
+    default_bucket_count: int,
+) -> tuple[int, int]:
+    bucket_count_raw = raw_values.get("bucket_count")
+    shards_raw = raw_values.get("shards")
+    if bucket_count_raw is not None and shards_raw is not None:
+        raise ValueError(f"template `{template_name}` accepts only one of `bucket_count` or `shards`")
+
+    bucket_count = (
+        _parse_positive_template_int(template_name, "bucket_count", bucket_count_raw)
+        if bucket_count_raw is not None
+        else None
+    )
+    shards = _parse_positive_template_int(template_name, "shards", shards_raw) if shards_raw is not None else None
+
+    try:
+        resolved_bucket_count, total_shards, _ = resolve_fuzz_campaign_bucket_count(
+            preset=preset,
+            default_bucket_count=default_bucket_count,
+            bucket_count=bucket_count,
+            shards=shards,
+        )
+    except ValueError as exc:
+        raise ValueError(f"template `{template_name}` {exc}") from exc
+
+    return resolved_bucket_count, total_shards
+
+
 def _render_codex_fuzz_matrix_manifest_axes(bucket_count: int, *, preset: BundledFuzzCampaignPreset) -> str:
     lines: list[str] = ["family:"]
     for family in preset.families:
@@ -241,21 +275,21 @@ def _render_codex_fuzz_family_values(*, preset: BundledFuzzCampaignPreset) -> st
 def _render_codex_fuzz_hierarchical_grouped_template(values: Mapping[str, str] | None = None) -> RenderedBundledTemplate:
     template_name = "codex-fuzz-hierarchical-grouped"
     raw_values = dict(values or {})
-    allowed = {"preset", "bucket_count", "concurrency", "name", "working_dir"}
+    allowed = {"preset", "shards", "bucket_count", "concurrency", "name", "working_dir"}
     _validate_template_settings(template_name, raw_values, allowed=allowed)
 
     preset = _resolve_fuzz_campaign_preset(template_name, raw_values)
-    bucket_count = _parse_positive_template_int(
+    bucket_count, total_shards = _resolve_preset_template_shard_sizing(
         template_name,
-        "bucket_count",
-        raw_values.get("bucket_count", str(_DEFAULT_FUZZ_HIERARCHICAL_BUCKET_COUNT)),
+        raw_values,
+        preset=preset,
+        default_bucket_count=_DEFAULT_FUZZ_HIERARCHICAL_BUCKET_COUNT,
     )
     concurrency = _parse_positive_template_int(
         template_name,
         "concurrency",
         raw_values.get("concurrency", str(_DEFAULT_FUZZ_HIERARCHICAL_CONCURRENCY)),
     )
-    total_shards = _fuzz_campaign_total_shards(bucket_count, preset=preset)
     name = _template_string_value(
         template_name,
         "name",
@@ -280,8 +314,8 @@ def _render_codex_fuzz_hierarchical_grouped_template(values: Mapping[str, str] |
 # Usage:
 #   agentflow template-presets
 #   agentflow init fuzz-hierarchical-grouped.yaml --template codex-fuzz-hierarchical-grouped
-#   agentflow init fuzz-browser-grouped-128.yaml --template codex-fuzz-hierarchical-grouped --set preset=browser-surface --set bucket_count=8 --set concurrency=32
-#   agentflow init fuzz-hierarchical-grouped-128.yaml --template codex-fuzz-hierarchical-grouped --set bucket_count=8 --set concurrency=32
+#   agentflow init fuzz-browser-grouped-128.yaml --template codex-fuzz-hierarchical-grouped --set preset=browser-surface --set shards=128 --set concurrency=32
+#   agentflow init fuzz-hierarchical-grouped-128.yaml --template codex-fuzz-hierarchical-grouped --set shards=128 --set concurrency=32
 #   agentflow inspect fuzz-hierarchical-grouped.yaml --output summary
 #   agentflow run fuzz-hierarchical-grouped.yaml --preflight never
 
@@ -447,21 +481,21 @@ nodes:
 def _render_codex_fuzz_matrix_manifest_template(values: Mapping[str, str] | None = None) -> RenderedBundledTemplate:
     template_name = "codex-fuzz-matrix-manifest"
     raw_values = dict(values or {})
-    allowed = {"preset", "bucket_count", "concurrency", "name", "working_dir"}
+    allowed = {"preset", "shards", "bucket_count", "concurrency", "name", "working_dir"}
     _validate_template_settings(template_name, raw_values, allowed=allowed)
 
     preset = _resolve_fuzz_campaign_preset(template_name, raw_values)
-    bucket_count = _parse_positive_template_int(
+    bucket_count, total_shards = _resolve_preset_template_shard_sizing(
         template_name,
-        "bucket_count",
-        raw_values.get("bucket_count", str(_DEFAULT_FUZZ_MATRIX_MANIFEST_BUCKET_COUNT)),
+        raw_values,
+        preset=preset,
+        default_bucket_count=_DEFAULT_FUZZ_MATRIX_MANIFEST_BUCKET_COUNT,
     )
     concurrency = _parse_positive_template_int(
         template_name,
         "concurrency",
         raw_values.get("concurrency", str(_DEFAULT_FUZZ_MATRIX_MANIFEST_CONCURRENCY)),
     )
-    total_shards = _fuzz_campaign_total_shards(bucket_count, preset=preset)
     name = _template_string_value(
         template_name,
         "name",
@@ -485,8 +519,8 @@ def _render_codex_fuzz_matrix_manifest_template(values: Mapping[str, str] | None
 # Usage:
 #   agentflow template-presets
 #   agentflow init fuzz-matrix-manifest.yaml --template codex-fuzz-matrix-manifest
-#   agentflow init fuzz-browser-manifest.yaml --template codex-fuzz-matrix-manifest --set preset=browser-surface --set bucket_count=8 --set concurrency=32
-#   agentflow init fuzz-matrix-manifest-128.yaml --template codex-fuzz-matrix-manifest --set bucket_count=8 --set concurrency=32
+#   agentflow init fuzz-browser-manifest.yaml --template codex-fuzz-matrix-manifest --set preset=browser-surface --set shards=128 --set concurrency=32
+#   agentflow init fuzz-matrix-manifest-128.yaml --template codex-fuzz-matrix-manifest --set shards=128 --set concurrency=32
 #   agentflow inspect fuzz-matrix-manifest.yaml --output summary
 #   agentflow run fuzz-matrix-manifest.yaml --preflight never
 
@@ -596,21 +630,21 @@ nodes:
 def _render_codex_fuzz_hierarchical_template(values: Mapping[str, str] | None = None) -> RenderedBundledTemplate:
     template_name = "codex-fuzz-hierarchical-manifest"
     raw_values = dict(values or {})
-    allowed = {"preset", "bucket_count", "concurrency", "name", "working_dir"}
+    allowed = {"preset", "shards", "bucket_count", "concurrency", "name", "working_dir"}
     _validate_template_settings(template_name, raw_values, allowed=allowed)
 
     preset = _resolve_fuzz_campaign_preset(template_name, raw_values)
-    bucket_count = _parse_positive_template_int(
+    bucket_count, total_shards = _resolve_preset_template_shard_sizing(
         template_name,
-        "bucket_count",
-        raw_values.get("bucket_count", str(_DEFAULT_FUZZ_HIERARCHICAL_BUCKET_COUNT)),
+        raw_values,
+        preset=preset,
+        default_bucket_count=_DEFAULT_FUZZ_HIERARCHICAL_BUCKET_COUNT,
     )
     concurrency = _parse_positive_template_int(
         template_name,
         "concurrency",
         raw_values.get("concurrency", str(_DEFAULT_FUZZ_HIERARCHICAL_CONCURRENCY)),
     )
-    total_shards = _fuzz_campaign_total_shards(bucket_count, preset=preset)
     name = _template_string_value(
         template_name,
         "name",
@@ -634,8 +668,8 @@ def _render_codex_fuzz_hierarchical_template(values: Mapping[str, str] | None = 
 # Usage:
 #   agentflow template-presets
 #   agentflow init fuzz-hierarchical.yaml --template codex-fuzz-hierarchical-manifest
-#   agentflow init fuzz-browser-hierarchical-128.yaml --template codex-fuzz-hierarchical-manifest --set preset=browser-surface --set bucket_count=8 --set concurrency=32
-#   agentflow init fuzz-hierarchical-128.yaml --template codex-fuzz-hierarchical-manifest --set bucket_count=8 --set concurrency=32
+#   agentflow init fuzz-browser-hierarchical-128.yaml --template codex-fuzz-hierarchical-manifest --set preset=browser-surface --set shards=128 --set concurrency=32
+#   agentflow init fuzz-hierarchical-128.yaml --template codex-fuzz-hierarchical-manifest --set shards=128 --set concurrency=32
 #   agentflow inspect fuzz-hierarchical.yaml --output summary
 #   agentflow run fuzz-hierarchical.yaml --preflight never
 
@@ -989,15 +1023,16 @@ def _render_codex_fuzz_campaign_template(values: Mapping[str, str] | None = None
 
     template_name = "codex-fuzz-campaign"
     raw_values = dict(values or {})
-    allowed = {"preset", "layout", "bucket_count", "batch_size", "concurrency", "name", "working_dir"}
+    allowed = {"preset", "layout", "shards", "bucket_count", "batch_size", "concurrency", "name", "working_dir"}
     _validate_template_settings(template_name, raw_values, allowed=allowed)
 
     preset = _resolve_fuzz_campaign_preset(template_name, raw_values)
     layout = _resolve_fuzz_campaign_layout(template_name, raw_values)
-    bucket_count = _parse_positive_template_int(
+    _, total_shards = _resolve_preset_template_shard_sizing(
         template_name,
-        "bucket_count",
-        raw_values.get("bucket_count", str(_DEFAULT_FUZZ_PRESET_BATCHED_BUCKET_COUNT)),
+        raw_values,
+        preset=preset,
+        default_bucket_count=_DEFAULT_FUZZ_PRESET_BATCHED_BUCKET_COUNT,
     )
     concurrency = _parse_positive_template_int(
         template_name,
@@ -1011,8 +1046,6 @@ def _render_codex_fuzz_campaign_template(values: Mapping[str, str] | None = None
     )
     if layout != "batched" and "batch_size" in raw_values:
         raise ValueError(f"template `{template_name}` only uses `batch_size` when `layout=batched`")
-
-    total_shards = _fuzz_campaign_total_shards(bucket_count, preset=preset)
     name = _template_string_value(
         template_name,
         "name",
@@ -1045,7 +1078,7 @@ def _render_codex_fuzz_campaign_template(values: Mapping[str, str] | None = None
     ) as dag:
         campaign_kwargs: dict[str, object] = {
             "preset": preset.name,
-            "bucket_count": bucket_count,
+            "shards": total_shards,
             "layout": layout,
         }
         if layout == "batched":
@@ -1378,14 +1411,15 @@ nodes:
 def _render_codex_fuzz_preset_batched_template(values: Mapping[str, str] | None = None) -> RenderedBundledTemplate:
     template_name = "codex-fuzz-preset-batched"
     raw_values = dict(values or {})
-    allowed = {"preset", "bucket_count", "batch_size", "concurrency", "name", "working_dir"}
+    allowed = {"preset", "shards", "bucket_count", "batch_size", "concurrency", "name", "working_dir"}
     _validate_template_settings(template_name, raw_values, allowed=allowed)
 
     preset = _resolve_fuzz_campaign_preset(template_name, raw_values)
-    bucket_count = _parse_positive_template_int(
+    _, total_shards = _resolve_preset_template_shard_sizing(
         template_name,
-        "bucket_count",
-        raw_values.get("bucket_count", str(_DEFAULT_FUZZ_PRESET_BATCHED_BUCKET_COUNT)),
+        raw_values,
+        preset=preset,
+        default_bucket_count=_DEFAULT_FUZZ_PRESET_BATCHED_BUCKET_COUNT,
     )
     batch_size = _parse_positive_template_int(
         template_name,
@@ -1397,7 +1431,6 @@ def _render_codex_fuzz_preset_batched_template(values: Mapping[str, str] | None 
         "concurrency",
         raw_values.get("concurrency", str(_DEFAULT_FUZZ_PRESET_BATCHED_CONCURRENCY)),
     )
-    total_shards = _fuzz_campaign_total_shards(bucket_count, preset=preset)
     batch_count = (total_shards + batch_size - 1) // batch_size
     name = _template_string_value(
         template_name,
@@ -1424,7 +1457,7 @@ def _render_codex_fuzz_preset_batched_template(values: Mapping[str, str] | None 
 #   agentflow template-presets
 #   agentflow init fuzz-preset-batched.yaml --template codex-fuzz-preset-batched
 #   agentflow init fuzz-browser-inline.yaml --template codex-fuzz-preset-batched --set preset=browser-surface
-#   agentflow init fuzz-protocol-256.yaml --template codex-fuzz-preset-batched --set preset=protocol-stack --set bucket_count=16 --set batch_size=32 --set concurrency=64
+#   agentflow init fuzz-protocol-256.yaml --template codex-fuzz-preset-batched --set preset=protocol-stack --set shards=256 --set batch_size=32 --set concurrency=64
 #   agentflow inspect fuzz-preset-batched.yaml --output summary
 #   agentflow run fuzz-preset-batched.yaml --preflight never
 
@@ -1459,7 +1492,7 @@ nodes:
       as: shard
       preset:
         name: $preset
-        bucket_count: $bucket_count
+        shards: $total_shards
     agent: codex
     model: gpt-5-codex
     tools: read_write
@@ -1569,7 +1602,6 @@ nodes:
         name=name,
         preset=preset.name,
         total_shards=total_shards,
-        bucket_count=bucket_count,
         batch_size=batch_size,
         batch_count=batch_count,
         working_dir=working_dir,
@@ -2250,9 +2282,9 @@ _BUNDLED_TEMPLATES = (
                 default=_DEFAULT_FUZZ_CAMPAIGN_PRESET,
             ),
             BundledTemplateParameter(
-                name="bucket_count",
-                description="Number of reusable seed buckets to render into the sidecar axes manifest.",
-                default=str(_DEFAULT_FUZZ_HIERARCHICAL_BUCKET_COUNT),
+                name="shards",
+                description="Target shard count to render from the preset-backed axes manifest.",
+                default=str(_fuzz_campaign_total_shards(_DEFAULT_FUZZ_HIERARCHICAL_BUCKET_COUNT, preset=_FUZZ_CAMPAIGN_PRESETS_BY_NAME[_DEFAULT_FUZZ_CAMPAIGN_PRESET])),
             ),
             BundledTemplateParameter(
                 name="concurrency",
@@ -2283,9 +2315,9 @@ _BUNDLED_TEMPLATES = (
                 default=_DEFAULT_FUZZ_CAMPAIGN_PRESET,
             ),
             BundledTemplateParameter(
-                name="bucket_count",
-                description="Number of reusable seed buckets to render into the sidecar axes manifest.",
-                default=str(_DEFAULT_FUZZ_HIERARCHICAL_BUCKET_COUNT),
+                name="shards",
+                description="Target shard count to render from the preset-backed axes manifest.",
+                default=str(_fuzz_campaign_total_shards(_DEFAULT_FUZZ_HIERARCHICAL_BUCKET_COUNT, preset=_FUZZ_CAMPAIGN_PRESETS_BY_NAME[_DEFAULT_FUZZ_CAMPAIGN_PRESET])),
             ),
             BundledTemplateParameter(
                 name="concurrency",
@@ -2319,9 +2351,9 @@ _BUNDLED_TEMPLATES = (
                 default=_DEFAULT_FUZZ_CAMPAIGN_PRESET,
             ),
             BundledTemplateParameter(
-                name="bucket_count",
-                description="Number of reusable seed buckets to render into the sidecar manifest.",
-                default=str(_DEFAULT_FUZZ_MATRIX_MANIFEST_BUCKET_COUNT),
+                name="shards",
+                description="Target shard count to render from the preset-backed axes manifest.",
+                default=str(_fuzz_campaign_total_shards(_DEFAULT_FUZZ_MATRIX_MANIFEST_BUCKET_COUNT, preset=_FUZZ_CAMPAIGN_PRESETS_BY_NAME[_DEFAULT_FUZZ_CAMPAIGN_PRESET])),
             ),
             BundledTemplateParameter(
                 name="concurrency",
@@ -2369,9 +2401,9 @@ _BUNDLED_TEMPLATES = (
                 default=_DEFAULT_FUZZ_CAMPAIGN_LAYOUT,
             ),
             BundledTemplateParameter(
-                name="bucket_count",
-                description="Number of reusable seed buckets to expand from the preset roster.",
-                default=str(_DEFAULT_FUZZ_PRESET_BATCHED_BUCKET_COUNT),
+                name="shards",
+                description="Target shard count to expand from the preset roster.",
+                default=str(_fuzz_campaign_total_shards(_DEFAULT_FUZZ_PRESET_BATCHED_BUCKET_COUNT, preset=_FUZZ_CAMPAIGN_PRESETS_BY_NAME[_DEFAULT_FUZZ_CAMPAIGN_PRESET])),
             ),
             BundledTemplateParameter(
                 name="batch_size",
@@ -2406,9 +2438,9 @@ _BUNDLED_TEMPLATES = (
                 default=_DEFAULT_FUZZ_CAMPAIGN_PRESET,
             ),
             BundledTemplateParameter(
-                name="bucket_count",
-                description="Number of reusable seed buckets to expand from the preset roster.",
-                default=str(_DEFAULT_FUZZ_PRESET_BATCHED_BUCKET_COUNT),
+                name="shards",
+                description="Target shard count to expand from the preset roster.",
+                default=str(_fuzz_campaign_total_shards(_DEFAULT_FUZZ_PRESET_BATCHED_BUCKET_COUNT, preset=_FUZZ_CAMPAIGN_PRESETS_BY_NAME[_DEFAULT_FUZZ_CAMPAIGN_PRESET])),
             ),
             BundledTemplateParameter(
                 name="batch_size",

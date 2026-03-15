@@ -55,7 +55,7 @@ with DAG(
         task_id="fuzzer",
         fanout=fanout_preset(
             preset="browser-surface",
-            bucket_count=4,
+            shards=128,
             as_="shard",
             extra_axes={
                 "lane": ["renderer", "sandbox"]

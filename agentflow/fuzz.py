@@ -45,7 +45,8 @@ class CodexFuzzCampaignNodes:
 def codex_fuzz_campaign_matrix(
     *,
     preset: str | None = None,
-    bucket_count: int = _DEFAULT_BUCKET_COUNT,
+    shards: int | None = None,
+    bucket_count: int | None = None,
     as_: str = "shard",
     label_template: str | None = _DEFAULT_LABEL_TEMPLATE,
     workspace_template: str | None = _DEFAULT_WORKSPACE_TEMPLATE,
@@ -61,6 +62,7 @@ def codex_fuzz_campaign_matrix(
 
     payload = build_codex_fuzz_campaign_matrix_payload(
         preset=preset,
+        shards=shards,
         bucket_count=bucket_count,
         label_template=label_template,
         workspace_template=workspace_template,
@@ -331,7 +333,8 @@ def _default_grouped_merge_prompt(
 def codex_fuzz_campaign(
     *,
     preset: str | None = None,
-    bucket_count: int = _DEFAULT_BUCKET_COUNT,
+    shards: int | None = None,
+    bucket_count: int | None = None,
     layout: CodexFuzzCampaignLayout = _DEFAULT_CAMPAIGN_LAYOUT,
     batch_size: int = _DEFAULT_BATCH_SIZE,
     task_prefix: str | None = None,
@@ -439,6 +442,7 @@ def codex_fuzz_campaign(
             {
                 "fanout": fanout_preset(
                     preset=preset,
+                    shards=shards,
                     bucket_count=bucket_count,
                     as_="shard",
                     label_template=label_template,

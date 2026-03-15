@@ -35,6 +35,7 @@ The fixed `*-128` examples are reference snapshots when you want to inspect a fu
 | `airflow_like.py` | You want the smallest Python-authored DAG reference. | Static dependencies with `plan >> [implement, review]`. |
 | `airflow_like_fuzz_batched.py` | You want a 128-shard Codex swarm authored from Python instead of YAML templates. | `DAG(node_defaults=..., agent_defaults=..., fail_fast=...)`, `fanout_count(...)`, `fanout_batches(...)`, `dag.to_yaml()`. |
 | `airflow_like_fuzz_campaign.py` | You want the shortest preset-backed Python path to a production-shaped 128-shard Codex campaign. | `codex_fuzz_campaign(...)`, built-in `protocol-stack` roster, grouped reducers, one helper call. |
+| `airflow_like_fuzz_dual_campaigns.py` | You want one DAG to coordinate multiple preset-backed campaigns while keeping their nodes isolated. | `codex_fuzz_campaign(...)`, `task_prefix=...`, dual 64-shard campaigns, one final maintainer merge. |
 | `airflow_like_fuzz_preset_batched.py` | You want a preset-backed 128-shard Codex campaign from Python without rewriting the full matrix axes. | `fanout_preset(...)`, built-in `browser-surface` roster, `fanout_batches(...)`, `dag.to_yaml()`. |
 | `airflow_like_fuzz_preset_grouped.py` | You want to adapt a built-in preset to a new 128-shard campaign shape with one extra axis and family reducers. | `fanout_preset(...)`, `extra_axes`, outer `derive`, `fanout_group_by(...)`. |
 | `airflow_like_fuzz_catalog_batched.py` | You want a 128-shard Python DAG backed by a CSV shard catalog plus neutral staged reducers. | `fanout_values_path(...)`, `fanout_batches(...)`, `dag.to_yaml()`. |
@@ -52,11 +53,13 @@ The fixed `*-128` examples are reference snapshots when you want to inspect a fu
 
 - Start with `codex-fanout-repo-sweep` for small repo reviews and move to `codex-repo-sweep-batched` once you need 32+ Codex workers or staged reducers.
 - Start with `codex-fuzz-campaign` when the roster already matches a built-in preset and you just need to choose `flat`, `batched`, or `grouped`.
+- Use `shards=...` for preset-backed starters when you know the target campaign size you want, and use `agentflow template-presets` to confirm the supported shard multiples for each preset.
 - Use `codex-fuzz-preset-batched` when you specifically want to study or customize the lower-level native `fanout.preset` plus `fanout.batches` pattern directly in YAML.
 - Start with `codex-fuzz-swarm` for homogeneous campaigns, then move to `codex-fuzz-batched` when the final reducer becomes too large to read.
 - Use the matrix starters when shard metadata is derivable, and use the catalog starters when every shard needs explicit maintainer-owned metadata.
 - Use `agentflow template-presets` plus `--set preset=...` when you want a realistic starting roster such as `browser-surface` or `protocol-stack` before hand-tuning the generated manifests or CSV files.
 - Use `airflow_like_fuzz_campaign.py` when you want the helper to register the whole preset-backed campaign shape for you instead of wiring `init`, `fuzzer`, reducers, and `merge` by hand.
+- Use `airflow_like_fuzz_dual_campaigns.py` when you need multiple preset-backed swarms in one DAG and want `task_prefix=` plus a final aggregator example.
 - Use `airflow_like_fuzz_preset_batched.py` when you want those same preset rosters directly from Python instead of going through a rendered YAML scaffold first.
 - Use `airflow_like_fuzz_preset_grouped.py` when the built-in preset is close, but you still need one more campaign axis such as `lane`, `environment`, or `coverage_tier`.
 - Use `codex-fuzz-catalog-batched` when the catalog rows need intermediate reducers but there is no stable family field worth grouping on.

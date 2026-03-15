@@ -506,6 +506,7 @@ class FanoutPresetSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
+    shards: int | None = Field(default=None, ge=1)
     bucket_count: int | None = Field(default=None, ge=1)
     label_template: str | None = None
     workspace_template: str | None = None
@@ -535,7 +536,7 @@ class FanoutPresetSpec(BaseModel):
             raise ValueError(f"`fanout.preset.name` must be one of {joined}")
         return normalized
 
-    @field_validator("bucket_count", "seed_start", "seed_label_width")
+    @field_validator("shards", "bucket_count", "seed_start", "seed_label_width")
     @classmethod
     def validate_numeric_fields(cls, value: int | None, info: Any) -> int | None:
         if value is None:
@@ -543,6 +544,12 @@ class FanoutPresetSpec(BaseModel):
         if isinstance(value, bool):
             raise ValueError(f"`fanout.preset.{info.field_name}` must be an integer")
         return value
+
+    @model_validator(mode="after")
+    def validate_sizing_fields(self) -> "FanoutPresetSpec":
+        if self.shards is not None and self.bucket_count is not None:
+            raise ValueError("`fanout.preset` accepts only one of `shards` or `bucket_count`")
+        return self
 
     @field_validator("seed_label_prefix")
     @classmethod
@@ -1074,6 +1081,8 @@ def _resolve_fanout_preset_mode(raw_fanout: Any) -> Any:
     preset_kwargs: dict[str, Any] = {}
     if "name" in preset.model_fields_set:
         preset_kwargs["preset"] = preset.name
+    if "shards" in preset.model_fields_set:
+        preset_kwargs["shards"] = preset.shards
     if "bucket_count" in preset.model_fields_set:
         preset_kwargs["bucket_count"] = preset.bucket_count
     if "label_template" in preset.model_fields_set:
