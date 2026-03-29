@@ -297,6 +297,33 @@ class ECSRunner(Runner):
             )
 
         try:
+            # Auto-discover networking if not specified
+            if not target.subnets or not target.security_groups:
+                from agentflow.cloud.aws import discover_networking
+                await on_output("stderr", "Auto-discovering VPC networking...")
+                net = await asyncio.to_thread(discover_networking, target.region)
+                subnets = target.subnets or net["subnets"]
+                security_groups = target.security_groups or net["security_groups"]
+                await on_output("stderr", f"Using subnets={subnets}, sg={security_groups}")
+                # Patch target for downstream use
+                from types import SimpleNamespace
+                target = SimpleNamespace(**{k: getattr(target, k) for k in target.model_fields})
+                target.subnets = subnets
+                target.security_groups = security_groups
+
+            # Auto-forward local credentials if not in env
+            from agentflow.cloud.aws import collect_local_credentials
+            local_creds = collect_local_credentials(node.agent.value)
+            merged_env = {**local_creds, **prepared.env}
+            prepared = PreparedExecution(
+                command=prepared.command,
+                env=merged_env,
+                cwd=prepared.cwd,
+                trace_kind=prepared.trace_kind,
+                runtime_files=prepared.runtime_files,
+                stdin=prepared.stdin,
+            )
+
             # Build agent image if needed
             image = target.image
             if not image and target.install_agents:
@@ -320,11 +347,15 @@ class ECSRunner(Runner):
             await on_output("stderr", "Ensuring ECS execution role...")
             role_arn = await asyncio.to_thread(self._ensure_execution_role, target.region)
 
+            # Create a node-like object with potentially patched target
+            from types import SimpleNamespace as _NS
+            effective_node = _NS(id=node.id, agent=node.agent, target=target, timeout_seconds=node.timeout_seconds)
+
             await on_output("stderr", f"Registering task definition (image: {image})...")
-            task_def_arn = await asyncio.to_thread(self._register_task_def, node, prepared, role_arn, image)
+            task_def_arn = await asyncio.to_thread(self._register_task_def, effective_node, prepared, role_arn, image)
 
             await on_output("stderr", "Running Fargate task...")
-            task_arn = await asyncio.to_thread(self._run_task, node, task_def_arn)
+            task_arn = await asyncio.to_thread(self._run_task, effective_node, task_def_arn)
             await on_output("stderr", f"Task {task_arn} started...")
 
             exit_code, stdout_lines, stderr_lines = await asyncio.to_thread(

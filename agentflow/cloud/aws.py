@@ -1,0 +1,115 @@
+"""AWS infrastructure auto-discovery and credential forwarding."""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Any
+
+
+def discover_networking(region: str) -> dict[str, Any]:
+    """Find default VPC, public subnets, and create/reuse a security group.
+
+    Returns ``{"subnets": [...], "security_groups": [...]}`` ready to
+    plug into an EC2Target or ECSTarget.
+    """
+    import boto3
+
+    ec2 = boto3.client("ec2", region_name=region)
+
+    # Find default VPC
+    vpcs = ec2.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
+    if not vpcs:
+        raise RuntimeError(f"No default VPC in {region}. Specify subnets/security_groups explicitly.")
+    vpc_id = vpcs[0]["VpcId"]
+
+    # Find public subnets (with auto-assign public IP or mapped to an IGW route)
+    all_subnets = ec2.describe_subnets(
+        Filters=[{"Name": "vpc-id", "Values": [vpc_id]}],
+    )["Subnets"]
+    subnets = [s["SubnetId"] for s in all_subnets if s.get("MapPublicIpOnLaunch", False)]
+    if not subnets:
+        # Fallback: just use all subnets in the default VPC
+        subnets = [s["SubnetId"] for s in all_subnets]
+    if not subnets:
+        raise RuntimeError(f"No subnets found in default VPC {vpc_id}.")
+
+    # Create or reuse agentflow security group
+    sg_name = "agentflow"
+    existing = ec2.describe_security_groups(
+        Filters=[
+            {"Name": "vpc-id", "Values": [vpc_id]},
+            {"Name": "group-name", "Values": [sg_name]},
+        ],
+    )["SecurityGroups"]
+    if existing:
+        sg_id = existing[0]["GroupId"]
+    else:
+        sg_id = ec2.create_security_group(
+            GroupName=sg_name,
+            Description="AgentFlow managed security group",
+            VpcId=vpc_id,
+        )["GroupId"]
+        # Allow SSH inbound (for EC2 runner)
+        ec2.authorize_security_group_ingress(
+            GroupId=sg_id,
+            IpPermissions=[
+                {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},
+            ],
+        )
+        # Allow all outbound (default, but be explicit)
+        # Already allowed by default SG rules
+
+    return {"subnets": subnets[:3], "security_groups": [sg_id]}
+
+
+def collect_local_credentials(agent: str) -> dict[str, str]:
+    """Read local agent credentials and return as env vars.
+
+    Checks config files and environment variables for each agent CLI
+    and returns a dict of env vars to forward to remote targets.
+    """
+    env: dict[str, str] = {}
+
+    if agent in ("codex", "all"):
+        # Check ~/.codex/auth.json
+        auth_path = Path.home() / ".codex" / "auth.json"
+        if auth_path.exists():
+            try:
+                auth = json.loads(auth_path.read_text(encoding="utf-8"))
+                if auth.get("OPENAI_API_KEY"):
+                    env["OPENAI_API_KEY"] = auth["OPENAI_API_KEY"]
+            except (json.JSONDecodeError, OSError):
+                pass
+        # Check ~/.codex/config.toml for base_url
+        config_path = Path.home() / ".codex" / "config.toml"
+        if config_path.exists():
+            try:
+                config_text = config_path.read_text(encoding="utf-8")
+                for line in config_text.splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("base_url"):
+                        # Parse: base_url = "http://..."
+                        _, _, value = stripped.partition("=")
+                        value = value.strip().strip('"').strip("'")
+                        if value:
+                            env["OPENAI_BASE_URL"] = value
+                            break
+            except OSError:
+                pass
+        # Check environment
+        if os.environ.get("OPENAI_API_KEY"):
+            env.setdefault("OPENAI_API_KEY", os.environ["OPENAI_API_KEY"])
+        if os.environ.get("OPENAI_BASE_URL"):
+            env.setdefault("OPENAI_BASE_URL", os.environ["OPENAI_BASE_URL"])
+
+    if agent in ("claude", "all"):
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            env["ANTHROPIC_API_KEY"] = os.environ["ANTHROPIC_API_KEY"]
+
+    if agent in ("kimi", "all"):
+        if os.environ.get("KIMI_API_KEY"):
+            env["KIMI_API_KEY"] = os.environ["KIMI_API_KEY"]
+
+    return env

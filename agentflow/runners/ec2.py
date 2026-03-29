@@ -118,6 +118,28 @@ class EC2Runner(Runner):
                     timed_out=False, cancelled=True,
                 )
 
+            # Auto-discover networking if not specified
+            if not target.security_group_ids:
+                from agentflow.cloud.aws import discover_networking
+                await on_output("stderr", "Auto-discovering VPC networking...")
+                net = await asyncio.to_thread(discover_networking, target.region)
+                from types import SimpleNamespace
+                target = SimpleNamespace(**{k: getattr(target, k) for k in target.model_fields})
+                target.security_group_ids = net["security_groups"]
+                if not target.subnet_id:
+                    target.subnet_id = net["subnets"][0]
+                # Patch node.target for _launch_instance
+                node = SimpleNamespace(id=node.id, agent=node.agent, target=target, timeout_seconds=node.timeout_seconds)
+
+            # Auto-forward local credentials
+            from agentflow.cloud.aws import collect_local_credentials
+            local_creds = collect_local_credentials(node.agent.value)
+            merged_env = {**local_creds, **prepared.env}
+            prepared = PreparedExecution(
+                command=prepared.command, env=merged_env, cwd=prepared.cwd,
+                trace_kind=prepared.trace_kind, runtime_files=prepared.runtime_files, stdin=prepared.stdin,
+            )
+
             await on_output("stderr", f"Launching EC2 {target.instance_type} ({target.ami})...")
             instance_id = await asyncio.to_thread(self._launch_instance, node, prepared)
             await on_output("stderr", f"Instance {instance_id} launched, waiting for SSH...")
