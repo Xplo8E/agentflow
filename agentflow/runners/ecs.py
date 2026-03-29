@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
+import subprocess
 import time
 
 from agentflow.prepared import ExecutionPaths, PreparedExecution
@@ -18,6 +21,55 @@ from agentflow.specs import NodeSpec
 
 class ECSRunner(Runner):
     """Execute agent nodes as ECS Fargate tasks."""
+
+    def _build_and_push_image(self, region: str, agents: list[str], on_status) -> str:
+        """Build a Docker image with agents and push to ECR. Returns image URI."""
+        import boto3
+
+        from agentflow.cloud.installer import agent_dockerfile
+
+        account = boto3.client("sts").get_caller_identity()["Account"]
+        repo_name = "agentflow-agents"
+        ecr = boto3.client("ecr", region_name=region)
+
+        # Ensure ECR repo
+        try:
+            ecr.create_repository(repositoryName=repo_name)
+        except ecr.exceptions.RepositoryAlreadyExistsException:
+            pass
+
+        image_uri = f"{account}.dkr.ecr.{region}.amazonaws.com/{repo_name}:latest"
+
+        # Docker login to ECR
+        token = ecr.get_authorization_token()
+        auth = token["authorizationData"][0]
+        registry = auth["proxyEndpoint"]
+        username, password = base64.b64decode(auth["authorizationToken"]).decode().split(":")
+        subprocess.run(
+            ["docker", "login", "--username", username, "--password-stdin", registry],
+            input=password, text=True, capture_output=True, check=True,
+        )
+
+        # Build image
+        dockerfile_content = agent_dockerfile(agents)
+        on_status(f"Building Docker image with agents: {agents}")
+        result = subprocess.run(
+            ["docker", "build", "-t", image_uri, "-"],
+            input=dockerfile_content, text=True, capture_output=True, timeout=600,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Docker build failed:\n{result.stderr}")
+
+        # Push
+        on_status(f"Pushing image to {image_uri}")
+        result = subprocess.run(
+            ["docker", "push", image_uri],
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Docker push failed:\n{result.stderr}")
+
+        return image_uri
 
     def _ensure_cluster(self, region: str, cluster_name: str) -> None:
         import boto3
@@ -70,19 +122,23 @@ class ECSRunner(Runner):
             RoleName=role_name,
             PolicyArn="arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy",
         )
+        iam.attach_role_policy(
+            RoleName=role_name,
+            PolicyArn="arn:aws:iam::aws:policy/CloudWatchLogsFullAccess",
+        )
         # Wait for IAM propagation
         time.sleep(10)
         return resp["Role"]["Arn"]
 
-    def _register_task_def(self, node: NodeSpec, prepared: PreparedExecution, execution_role_arn: str) -> str:
+    def _register_task_def(self, node: NodeSpec, prepared: PreparedExecution, execution_role_arn: str, image: str) -> str:
         import boto3
 
         target = node.target
         ecs = boto3.client("ecs", region_name=target.region)
-        image = target.image or "ubuntu:24.04"
         log_group = f"/agentflow/{node.id}"
         env_list = [{"name": k, "value": v} for k, v in prepared.env.items()]
-        cmd_str = " ".join(prepared.command)
+        import shlex
+        cmd_str = " ".join(shlex.quote(part) for part in prepared.command)
 
         resp = ecs.register_task_definition(
             family=f"agentflow-{node.id}",
@@ -95,7 +151,8 @@ class ECSRunner(Runner):
                 {
                     "name": "agent",
                     "image": image,
-                    "command": ["bash", "-c", cmd_str],
+                    "entryPoint": ["bash", "-c"],
+                    "command": [cmd_str],
                     "environment": env_list,
                     "essential": True,
                     "logConfiguration": {
@@ -169,6 +226,26 @@ class ECSRunner(Runner):
                 pass
 
             if status == "STOPPED":
+                # Wait for CloudWatch log propagation
+                time.sleep(5)
+                # Final log fetch
+                try:
+                    streams = logs_client.describe_log_streams(
+                        logGroupName=log_group, orderBy="LastEventTime", limit=10,
+                    ).get("logStreams", [])
+                    for stream in streams:
+                        events = logs_client.get_log_events(
+                            logGroupName=log_group,
+                            logStreamName=stream["logStreamName"],
+                            startFromHead=True,
+                        ).get("events", [])
+                        for event in events:
+                            token = f"{stream['logStreamName']}:{event['timestamp']}:{event['message']}"
+                            if token not in seen_tokens:
+                                seen_tokens.add(token)
+                                stdout_lines.append(event["message"].rstrip())
+                except Exception:
+                    pass
                 container = task.get("containers", [{}])[0]
                 exit_code = container.get("exitCode", 1)
                 reason = container.get("reason", "")
@@ -214,6 +291,19 @@ class ECSRunner(Runner):
             )
 
         try:
+            # Build agent image if needed
+            image = target.image
+            if not image and target.install_agents:
+                def _status(msg):
+                    pass  # sync callback for build progress
+                await on_output("stderr", f"Building agent image with {target.install_agents}...")
+                image = await asyncio.to_thread(
+                    self._build_and_push_image, target.region, target.install_agents, _status,
+                )
+                await on_output("stderr", f"Image ready: {image}")
+            elif not image:
+                image = "ubuntu:24.04"
+
             await on_output("stderr", f"Ensuring ECS cluster {target.cluster}...")
             await asyncio.to_thread(self._ensure_cluster, target.region, target.cluster)
 
@@ -223,8 +313,8 @@ class ECSRunner(Runner):
             await on_output("stderr", "Ensuring ECS execution role...")
             role_arn = await asyncio.to_thread(self._ensure_execution_role, target.region)
 
-            await on_output("stderr", "Registering task definition...")
-            task_def_arn = await asyncio.to_thread(self._register_task_def, node, prepared, role_arn)
+            await on_output("stderr", f"Registering task definition (image: {image})...")
+            task_def_arn = await asyncio.to_thread(self._register_task_def, node, prepared, role_arn, image)
 
             await on_output("stderr", "Running Fargate task...")
             task_arn = await asyncio.to_thread(self._run_task, node, task_def_arn)

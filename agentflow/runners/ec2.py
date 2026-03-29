@@ -129,7 +129,7 @@ class EC2Runner(Runner):
                 )
 
             ip = await asyncio.to_thread(self._wait_for_ssh, target.region, instance_id)
-            await on_output("stderr", f"Instance ready at {ip}, executing...")
+            await on_output("stderr", f"Instance ready at {ip}")
 
             from types import SimpleNamespace
 
@@ -139,11 +139,33 @@ class EC2Runner(Runner):
                 identity_file=target.identity_file,
                 remote_workdir=None,
             )
+            ssh_runner = SSHRunner()
+
+            # Wait for cloud-init to finish if agents are being installed
+            if target.install_agents:
+                await on_output("stderr", "Waiting for agent installation (cloud-init)...")
+                wait_node = SimpleNamespace(
+                    id=node.id, target=ssh_target, timeout_seconds=600,
+                )
+                wait_prepared = PreparedExecution(
+                    command=["cloud-init", "status", "--wait"],
+                    env={}, cwd="/tmp", trace_kind="setup",
+                    runtime_files={}, stdin=None,
+                )
+                wait_result = await ssh_runner.execute(
+                    wait_node, wait_prepared, paths,
+                    lambda s, l: on_output("stderr", f"  [cloud-init] {l}"),
+                    should_cancel,
+                )
+                if wait_result.exit_code != 0:
+                    await on_output("stderr", "cloud-init may have failed, proceeding anyway...")
+
+            await on_output("stderr", "Executing agent command...")
             ssh_node = SimpleNamespace(
                 id=node.id, target=ssh_target,
                 timeout_seconds=node.timeout_seconds,
             )
-            return await SSHRunner().execute(ssh_node, prepared, paths, on_output, should_cancel)
+            return await ssh_runner.execute(ssh_node, prepared, paths, on_output, should_cancel)
         except Exception as exc:
             return RawExecutionResult(
                 exit_code=1, stdout_lines=[],
