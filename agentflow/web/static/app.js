@@ -128,6 +128,93 @@ function truncateGraphLabel(value, maxLength) {
   return text.length > maxLength ? `${text.slice(0, Math.max(0, maxLength - 3))}...` : text;
 }
 
+function ensureGraphNodeTooltip() {
+  if (!document.getElementById("graph-node-tooltip-styles")) {
+    const style = document.createElement("style");
+    style.id = "graph-node-tooltip-styles";
+    style.textContent = `
+      .graph-node-tooltip {
+        position: fixed;
+        top: 0;
+        left: 0;
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.25rem 0.7rem;
+        max-width: 320px;
+        padding: 0.75rem 0.85rem;
+        border: 1px solid rgba(148, 163, 184, 0.24);
+        border-radius: 12px;
+        background: rgba(9, 12, 18, 0.96);
+        color: #f8fafc;
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.34);
+        z-index: 9999;
+        pointer-events: none;
+        opacity: 0;
+        visibility: hidden;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .graph-node-tooltip.is-visible {
+        opacity: 1;
+        visibility: visible;
+      }
+
+      .graph-node-tooltip-label {
+        color: #94a3b8;
+        font-weight: 600;
+      }
+
+      .graph-node-tooltip-value {
+        min-width: 0;
+        word-break: break-word;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  let tooltip = document.getElementById("graph-node-tooltip");
+  if (!tooltip) {
+    tooltip = document.createElement("div");
+    tooltip.id = "graph-node-tooltip";
+    tooltip.className = "graph-node-tooltip";
+    document.body.appendChild(tooltip);
+  }
+  return tooltip;
+}
+
+function formatGraphNodeTooltipDuration(nodeState) {
+  const directDuration = extractDuration(nodeState);
+  if (directDuration) return directDuration;
+
+  const attempts = Array.isArray(nodeState?.attempts) ? nodeState.attempts : [];
+  const latestAttempt = attempts.length ? attempts[attempts.length - 1] : null;
+  const currentAttempt = attempts.find((attempt) => attempt.number === nodeState?.current_attempt) || latestAttempt;
+  const startedAt = nodeState?.started_at || currentAttempt?.started_at;
+  const finishedAt = nodeState?.finished_at || currentAttempt?.finished_at;
+  if (!startedAt) return "-";
+  const startedMs = new Date(startedAt).getTime();
+  const finishedMs = finishedAt ? new Date(finishedAt).getTime() : Date.now();
+  if (!Number.isFinite(startedMs) || !Number.isFinite(finishedMs)) return "-";
+  return formatElapsedSeconds(Math.max(0, (finishedMs - startedMs) / 1000)) || "-";
+}
+
+function formatGraphNodeTooltipExitCode(nodeState) {
+  const attempts = Array.isArray(nodeState?.attempts) ? nodeState.attempts : [];
+  const latestAttempt = attempts.length ? attempts[attempts.length - 1] : null;
+  const currentAttempt = attempts.find((attempt) => attempt.number === nodeState?.current_attempt) || latestAttempt;
+  const exitCode = nodeState?.exit_code ?? currentAttempt?.exit_code;
+  return exitCode ?? "-";
+}
+
+function setGraphNodeTooltipPosition(tooltip, event) {
+  const offset = 14;
+  const maxLeft = Math.max(12, window.innerWidth - tooltip.offsetWidth - 12);
+  const maxTop = Math.max(12, window.innerHeight - tooltip.offsetHeight - 12);
+  tooltip.style.left = `${Math.min(maxLeft, event.clientX + offset)}px`;
+  tooltip.style.top = `${Math.min(maxTop, event.clientY + offset)}px`;
+}
+
 function graphLayout(nodes) {
   const levels = topoLevels(nodes);
   const groups = {};
@@ -188,17 +275,84 @@ function renderRuns() {
     container.innerHTML = '<div class="small">No runs yet.</div>';
     return;
   }
-  container.innerHTML = runs.map((run) => `
-    <div class="run-item ${run.id === state.runId ? "active" : ""}">
-      <h3>${escapeHtml(run.pipeline.name)}</h3>
-      <div class="small mono">${run.id}</div>
-      <div class="small">Status: ${escapeHtml(run.status)} · Started: ${escapeHtml(formatDate(run.started_at || run.created_at))}</div>
-      <div class="small">Duration: ${escapeHtml(formatDuration(run))}</div>
-      <div class="button-row" style="margin-top:0.65rem">
-        <button data-open-run="${run.id}">Open</button>
-      </div>
-    </div>
-  `).join("");
+  const liveRunStatuses = new Set(["running", "cancelling"]);
+  const inactiveNodeStatuses = new Set(["pending", "queued", "ready"]);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const groups = { Today: [], Yesterday: [], Older: [] };
+
+  for (const run of runs) {
+    const runDate = new Date(run.started_at || run.created_at || 0);
+    if (Number.isNaN(runDate.getTime())) {
+      groups.Older.push(run);
+      continue;
+    }
+    runDate.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((today - runDate) / 86400000);
+    if (diffDays <= 0) groups.Today.push(run);
+    else if (diffDays === 1) groups.Yesterday.push(run);
+    else groups.Older.push(run);
+  }
+
+  const renderProgress = (run) => {
+    if (!liveRunStatuses.has(String(run.status || "").toLowerCase())) return "";
+
+    const pipelineNodeIds = Array.isArray(run.pipeline?.nodes) ? run.pipeline.nodes.map((node) => node.id) : [];
+    const nodeIds = pipelineNodeIds.length ? pipelineNodeIds : Object.keys(run.nodes || {});
+    const totalNodes = nodeIds.length;
+    if (!totalNodes) return "";
+
+    const progressedNodes = nodeIds.filter((nodeId) => {
+      const status = String(run.nodes?.[nodeId]?.status || "pending").toLowerCase();
+      return !inactiveNodeStatuses.has(status);
+    }).length;
+    const progressPercent = Math.max(0, Math.min(100, (progressedNodes / totalNodes) * 100));
+
+    return `
+      <section
+        class="small"
+        style="grid-column:1 / -1;display:grid;gap:0.4rem;margin-top:0.1rem"
+        aria-label="Run progress ${progressedNodes} of ${totalNodes} nodes"
+      >
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem">
+          <span>Progress</span>
+          <span>${progressedNodes}/${totalNodes} nodes</span>
+        </div>
+        <div
+          aria-hidden="true"
+          style="height:7px;border-radius:999px;overflow:hidden;background:rgba(139, 148, 158, 0.16);border:1px solid rgba(210, 153, 34, 0.22)"
+        >
+          <div style="height:100%;width:${progressPercent}%;background:linear-gradient(90deg, rgba(210, 153, 34, 0.88), rgba(88, 166, 255, 0.92))"></div>
+        </div>
+      </section>
+    `;
+  };
+
+  container.innerHTML = ["Today", "Yesterday", "Older"]
+    .filter((label) => groups[label].length)
+    .map((label) => `
+      <section aria-label="${label} runs">
+        <div
+          class="small"
+          style="position:sticky;top:0;z-index:2;padding:0.45rem 0.75rem;margin:0 0 0.8rem;border:1px solid var(--border);border-radius:999px;background:rgba(13, 17, 23, 0.94);backdrop-filter:blur(10px);text-transform:uppercase;letter-spacing:0.12em"
+        >
+          ${label}
+        </div>
+        ${groups[label].map((run) => `
+          <div class="run-item ${run.id === state.runId ? "active" : ""}">
+            <h3>${escapeHtml(run.pipeline.name)}</h3>
+            <div class="small mono">${run.id}</div>
+            <div class="small">Status: ${escapeHtml(run.status)} · Started: ${escapeHtml(formatDate(run.started_at || run.created_at))}</div>
+            <div class="small">Duration: ${escapeHtml(formatDuration(run))}</div>
+            ${renderProgress(run)}
+            <div class="button-row" style="margin-top:0.65rem">
+              <button data-open-run="${run.id}">Open</button>
+            </div>
+          </div>
+        `).join("")}
+      </section>
+    `).join("");
 
   container.querySelectorAll("button[data-open-run]").forEach((button) => {
     button.onclick = async () => {
@@ -209,6 +363,8 @@ function renderRuns() {
 
 function renderGraph(pipelineNodes = null, nodeStatusMap = null) {
   const container = document.getElementById("graph");
+  const existingTooltip = document.getElementById("graph-node-tooltip");
+  if (existingTooltip) existingTooltip.classList.remove("is-visible");
   if (graphViewState.cleanup) {
     graphViewState.cleanup();
     graphViewState.cleanup = null;
@@ -224,6 +380,7 @@ function renderGraph(pipelineNodes = null, nodeStatusMap = null) {
     container.innerHTML = '<p class="small" style="padding:1rem">Validate or run a pipeline to render the DAG.</p>';
     return;
   }
+  const graphTooltip = ensureGraphNodeTooltip();
 
   const layout = graphLayout(nodes);
   const signature = graphLayoutSignature(nodes);
@@ -267,10 +424,10 @@ function renderGraph(pipelineNodes = null, nodeStatusMap = null) {
     const marker = document.createElementNS(ns, "marker");
     marker.setAttribute("id", id);
     marker.setAttribute("viewBox", "0 0 10 10");
-    marker.setAttribute("refX", "9");
+    marker.setAttribute("refX", "8");
     marker.setAttribute("refY", "5");
-    marker.setAttribute("markerWidth", "8");
-    marker.setAttribute("markerHeight", "8");
+    marker.setAttribute("markerWidth", "7");
+    marker.setAttribute("markerHeight", "7");
     marker.setAttribute("markerUnits", "strokeWidth");
     marker.setAttribute("orient", "auto");
     const arrow = document.createElementNS(ns, "path");
@@ -325,8 +482,9 @@ function renderGraph(pipelineNodes = null, nodeStatusMap = null) {
     const endX = to.x;
     const endY = to.y + to.height / 2;
     const direction = endX >= startX ? 1 : -1;
-    const curve = Math.max(52, Math.abs(endX - startX) * 0.45);
-    return `M ${startX} ${startY} C ${startX + direction * curve} ${startY}, ${endX - direction * curve} ${endY}, ${endX} ${endY}`;
+    const controlX = startX + direction * Math.max(52, Math.abs(endX - startX) * 0.5);
+    const controlY = startY + (endY - startY) * 0.5;
+    return `M ${startX} ${startY} Q ${controlX} ${controlY} ${endX} ${endY}`;
   }
 
   function cyclePath(fromId, toId) {
@@ -336,10 +494,11 @@ function renderGraph(pipelineNodes = null, nodeStatusMap = null) {
     const startY = from.y + from.height / 2;
     const endX = to.x + to.width;
     const endY = to.y + to.height / 2;
-    const horizontalLift = Math.max(92, Math.abs(startX - endX) * 0.3);
-    const verticalLift = Math.max(96, Math.abs(startY - endY) * 0.45 + 36);
+    const horizontalLift = Math.max(96, Math.abs(startX - endX) * 0.35);
+    const verticalLift = Math.max(108, Math.abs(startY - endY) * 0.45 + 40);
+    const controlX = Math.min(startX, endX) - horizontalLift;
     const controlY = Math.min(startY, endY) - verticalLift;
-    return `M ${startX} ${startY} C ${startX - horizontalLift} ${controlY}, ${endX + horizontalLift} ${controlY}, ${endX} ${endY}`;
+    return `M ${startX} ${startY} Q ${controlX} ${controlY} ${endX} ${endY}`;
   }
 
   function updateNodePosition(nodeId) {
@@ -387,7 +546,7 @@ function renderGraph(pipelineNodes = null, nodeStatusMap = null) {
       edge.setAttribute("fill", "none");
       edge.setAttribute("stroke", "#f85149");
       edge.setAttribute("stroke-width", "2");
-      edge.setAttribute("stroke-dasharray", "8 6");
+      edge.setAttribute("stroke-dasharray", "6,4");
       edge.setAttribute("stroke-linecap", "round");
       edge.setAttribute("stroke-linejoin", "round");
       edge.setAttribute("marker-end", "url(#graph-arrow-cycle)");
@@ -500,6 +659,34 @@ function renderGraph(pipelineNodes = null, nodeStatusMap = null) {
       renderDetail();
     });
 
+    group.addEventListener("mouseover", (event) => {
+      if (group.contains(event.relatedTarget)) return;
+      graphTooltip.innerHTML = `
+        <div class="graph-node-tooltip-label">Node ID</div>
+        <div class="graph-node-tooltip-value">${escapeHtml(node.id)}</div>
+        <div class="graph-node-tooltip-label">Agent</div>
+        <div class="graph-node-tooltip-value">${escapeHtml(node.agent || "-")}</div>
+        <div class="graph-node-tooltip-label">Status</div>
+        <div class="graph-node-tooltip-value">${escapeHtml(status)}</div>
+        <div class="graph-node-tooltip-label">Duration</div>
+        <div class="graph-node-tooltip-value">${escapeHtml(formatGraphNodeTooltipDuration(result))}</div>
+        <div class="graph-node-tooltip-label">Exit code</div>
+        <div class="graph-node-tooltip-value">${escapeHtml(String(formatGraphNodeTooltipExitCode(result)))}</div>
+      `;
+      graphTooltip.classList.add("is-visible");
+      setGraphNodeTooltipPosition(graphTooltip, event);
+    });
+
+    group.addEventListener("mousemove", (event) => {
+      if (!graphTooltip.classList.contains("is-visible")) return;
+      setGraphNodeTooltipPosition(graphTooltip, event);
+    });
+
+    group.addEventListener("mouseout", (event) => {
+      if (group.contains(event.relatedTarget)) return;
+      graphTooltip.classList.remove("is-visible");
+    });
+
     nodesLayer.appendChild(group);
   });
 
@@ -577,6 +764,7 @@ function renderGraph(pipelineNodes = null, nodeStatusMap = null) {
   window.addEventListener("mouseup", handleMouseUp);
 
   graphViewState.cleanup = () => {
+    graphTooltip.classList.remove("is-visible");
     svg.removeEventListener("mousedown", handleMouseDown);
     svg.removeEventListener("wheel", handleWheel);
     window.removeEventListener("mousemove", handleMouseMove);
@@ -1222,10 +1410,49 @@ async function renderDetail() {
 
   const lifecycleEventRows = state.events.filter((event) => event.node_id === selectedNodeId && event.type !== "node_trace");
   const lifecycleEvents = lifecycleEventRows.slice(-12).reverse();
-  const traceCards = buildTraceEntries(selectedNodeId, selected.trace_events || []);
-  traceCards.forEach((entry) => {
-    entry.open = openTraceKeys.has(entry.key);
-  });
+  const traceTimestamps = traceTimestampMap(selectedNodeId);
+  const traceCards = (selected.trace_events || [])
+    .map((trace, index) => ({ trace, index, timestamp: traceTimestamps[index] || null }))
+    .slice(-25)
+    .reverse()
+    .map(({ trace, index, timestamp }) => {
+      const kind = String(trace?.kind || "").toLowerCase();
+      const title = trace?.title || trace?.kind || "Trace event";
+      const traceKey = `${selectedNodeId}:${index}:${trace?.kind || "trace"}:${title}`;
+      const isError = kind.includes("error") || String(title).toLowerCase().includes("error");
+      const dotColor = isError
+        ? "#ef4444"
+        : ["tool_call", "tool_use", "toolcall"].includes(kind)
+          ? "#3b82f6"
+          : "#94a3b8";
+      let content = trace?.content ?? "";
+      if (typeof content === "string") {
+        const trimmed = content.trim();
+        if (trimmed && ["{", "[", "\""].includes(trimmed[0])) {
+          try {
+            content = JSON.parse(trimmed);
+          } catch {}
+        }
+      }
+
+      return `
+        <details class="trace-card" data-trace-key="${escapeHtml(traceKey)}"${isError || openTraceKeys.has(traceKey) ? " open" : ""}>
+          <summary>
+            <span aria-hidden="true" style="width:0.72rem;height:0.72rem;border-radius:999px;background:${dotColor};display:inline-block;flex:0 0 auto;margin-top:0.1rem;"></span>
+            <span class="trace-card-header">
+              <strong>${escapeHtml(title)}</strong>
+              <span class="trace-card-meta">
+                ${timestamp ? `<span class="small">${escapeHtml(formatDate(timestamp))}</span>` : ""}
+              </span>
+            </span>
+          </summary>
+          <div class="trace-card-body">
+            ${renderPreBlock(content, "trace-command-block")}
+          </div>
+        </details>
+      `;
+    })
+    .join("");
   const nextEventSignature = `${selectedNodeId}:${(selected.trace_events || []).length}:${lifecycleEventRows.length}`;
   const shouldAutoScroll = state.detailAutoScroll && state.detailEventSignature !== null && state.detailEventSignature !== nextEventSignature;
 
@@ -1251,7 +1478,7 @@ async function renderDetail() {
     <div class="trace-item">
       <h4>Trace Timeline</h4>
       <div class="trace-stack">
-        ${traceCards.map((entry) => renderTraceCard(entry)).join("") || '<div class="trace-empty">No parsed tool or trace activity yet.</div>'}
+        ${traceCards || '<div class="trace-empty">No parsed tool or trace activity yet.</div>'}
       </div>
     </div>
     <div class="trace-item">
@@ -1325,12 +1552,19 @@ function applyEvent(event) {
       success: event.data.success,
     });
   }
+  if (event.type === "node_failed" && event.node_id) {
+    showToast(`Node failed: ${event.node_id}`, "error");
+  }
   if (event.type === "node_skipped" && event.node_id) {
     state.nodes[event.node_id].status = "skipped";
   }
   if (event.type === "run_completed") {
     const run = currentRun();
     if (run) run.status = event.data.status;
+    showToast(
+      `Run ${state.runId || "current"} completed with status ${event.data.status}.`,
+      event.data.status === "completed" ? "success" : event.data.status === "cancelled" ? "warning" : "error"
+    );
   }
   renderRunMeta();
   renderRuns();
@@ -1348,6 +1582,7 @@ function connectStream(runId) {
 }
 
 async function refreshRuns() {
+  showSkeleton("runs");
   state.runs = await api("/api/runs");
   updateTopMetrics();
   renderRuns();
@@ -1412,6 +1647,126 @@ async function rerunRun() {
   setBanner(`Rerun queued: ${rerun.id}`, "success");
 }
 
+function ensureTransientUiStyles() {
+  if (document.getElementById("agentflow-transient-ui-styles")) return;
+  const style = document.createElement("style");
+  style.id = "agentflow-transient-ui-styles";
+  style.textContent = `
+    .toast-stack {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      pointer-events: none;
+    }
+
+    .toast {
+      min-width: 240px;
+      max-width: 360px;
+      padding: 0.9rem 1rem;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      box-shadow: 0 14px 40px rgba(15, 23, 42, 0.22);
+      color: #0f172a;
+      font-weight: 600;
+      line-height: 1.4;
+      pointer-events: auto;
+      animation: agentflow-toast-in 180ms ease-out;
+    }
+
+    .toast.info {
+      background: #dbeafe;
+      border-color: #60a5fa;
+    }
+
+    .toast.success {
+      background: #dcfce7;
+      border-color: #4ade80;
+    }
+
+    .toast.error {
+      background: #fee2e2;
+      border-color: #f87171;
+    }
+
+    .toast.warning {
+      background: #fef3c7;
+      border-color: #fbbf24;
+    }
+
+    .skeleton-stack {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .skeleton-bar {
+      height: 16px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(148, 163, 184, 0.18), rgba(148, 163, 184, 0.38), rgba(148, 163, 184, 0.18));
+      background-size: 200% 100%;
+      animation: agentflow-skeleton-pulse 1.2s ease-in-out infinite;
+    }
+
+    @keyframes agentflow-toast-in {
+      from {
+        opacity: 0;
+        transform: translateY(-8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes agentflow-skeleton-pulse {
+      0% {
+        background-position: 200% 0;
+      }
+      100% {
+        background-position: -200% 0;
+      }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function showToast(message, type = "info") {
+  if (!message) return;
+  ensureTransientUiStyles();
+  let stack = document.getElementById("toast-stack");
+  if (!stack) {
+    stack = document.createElement("div");
+    stack.id = "toast-stack";
+    stack.className = "toast-stack";
+    document.body.appendChild(stack);
+  }
+  const toast = document.createElement("div");
+  const normalizedType = ["info", "success", "error", "warning"].includes(type) ? type : "info";
+  toast.className = `toast ${normalizedType}`;
+  toast.textContent = message;
+  stack.appendChild(toast);
+  window.setTimeout(() => {
+    toast.remove();
+    if (!stack.childElementCount) stack.remove();
+  }, 4000);
+}
+
+function showSkeleton(elementId) {
+  ensureTransientUiStyles();
+  const element = document.getElementById(elementId);
+  if (!element) return;
+  element.innerHTML = `
+    <div class="skeleton-stack" aria-hidden="true">
+      <div class="skeleton-bar"></div>
+      <div class="skeleton-bar" style="width: 84%"></div>
+      <div class="skeleton-bar" style="width: 68%"></div>
+    </div>
+  `;
+}
+
 for (const button of document.querySelectorAll(".artifact-button")) {
   button.onclick = async () => {
     state.selectedArtifact = button.dataset.artifact;
@@ -1438,3 +1793,123 @@ refreshRuns()
     if (state.runs[0]) await openRun(state.runs[0].id);
   })
   .catch((error) => setBanner(error.message, "error"));
+
+function activeRunListItem() {
+  const activeElement = document.activeElement;
+  if (!(activeElement instanceof Element)) return null;
+  return activeElement.closest("#runs .run-item");
+}
+
+function runListItems() {
+  return Array.from(document.querySelectorAll("#runs .run-item"));
+}
+
+function runIdForItem(item) {
+  if (!(item instanceof Element)) return null;
+  return item.querySelector("button[data-open-run]")?.dataset.openRun || null;
+}
+
+function decorateRunListForKeyboard() {
+  runListItems().forEach((item) => {
+    if (!item.hasAttribute("tabindex")) item.tabIndex = 0;
+    const button = item.querySelector("button[data-open-run]");
+    if (button) item.dataset.runId = button.dataset.openRun || "";
+  });
+}
+
+function focusRunListItem(item) {
+  if (!(item instanceof HTMLElement)) return;
+  item.focus();
+  item.scrollIntoView({ block: "nearest" });
+}
+
+function currentRunListIndex(items) {
+  const activeItem = activeRunListItem();
+  const focusedIndex = activeItem ? items.indexOf(activeItem) : -1;
+  if (focusedIndex >= 0) return focusedIndex;
+  const selectedIndex = items.findIndex((item) => runIdForItem(item) === state.runId);
+  return selectedIndex;
+}
+
+function isTextInputTarget(target) {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+}
+
+function isInteractiveTarget(target) {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(target.closest("button, a, [role='button'], [tabindex]"));
+}
+
+const keyboardFocusStyles = document.createElement("style");
+keyboardFocusStyles.textContent = `
+  .run-item:focus-visible {
+    outline: none;
+    border-color: var(--link);
+    box-shadow:
+      0 0 0 3px rgba(88, 166, 255, 0.22),
+      0 12px 24px rgba(0, 0, 0, 0.22);
+  }
+
+  button:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+  }
+`;
+document.head.appendChild(keyboardFocusStyles);
+
+const runsContainer = document.getElementById("runs");
+if (runsContainer) {
+  decorateRunListForKeyboard();
+  const runsObserver = new MutationObserver(() => {
+    decorateRunListForKeyboard();
+  });
+  runsObserver.observe(runsContainer, { childList: true, subtree: true });
+}
+
+document.addEventListener("keydown", (e) => {
+  if (isTextInputTarget(e.target)) return;
+
+  if (e.key === "Escape") {
+    if (!state.selectedNodeId) return;
+    state.selectedNodeId = null;
+    renderGraph();
+    renderDetail();
+    e.preventDefault();
+    return;
+  }
+
+  if (!["ArrowUp", "ArrowDown", "Enter"].includes(e.key)) return;
+
+  if (e.key === "Enter") {
+    const activeItem = activeRunListItem();
+    if (!activeItem) return;
+    if (e.target instanceof Element && e.target.closest("button[data-open-run]")) return;
+    const openButton = activeItem.querySelector("button[data-open-run]");
+    if (!openButton) return;
+    openButton.click();
+    focusRunListItem(activeItem);
+    e.preventDefault();
+    return;
+  }
+
+  if (isInteractiveTarget(e.target) && !activeRunListItem()) return;
+
+  const items = runListItems();
+  if (!items.length) return;
+
+  if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+    const currentIndex = currentRunListIndex(items);
+    const delta = e.key === "ArrowDown" ? 1 : -1;
+    const fallbackIndex = e.key === "ArrowDown" ? 0 : items.length - 1;
+    const nextIndex = currentIndex === -1
+      ? fallbackIndex
+      : Math.max(0, Math.min(items.length - 1, currentIndex + delta));
+    focusRunListItem(items[nextIndex]);
+    e.preventDefault();
+  }
+});

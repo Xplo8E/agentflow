@@ -19,7 +19,7 @@
         --border: rgba(201, 209, 217, 0.1);
         --border-strong: rgba(88, 166, 255, 0.28);
         --text: #c9d1d9;
-        --muted: #8b949e;
+        --muted: #9eaab6;
         --link: #58a6ff;
         --success: #3fb950;
         --warning: #d29922;
@@ -63,10 +63,14 @@
         color: var(--link);
       }
 
+      ::selection {
+        background: rgba(88, 166, 255, 0.3);
+      }
+
       .skip-link {
         position: absolute;
-        left: 24px;
-        top: 0;
+        left: -9999px;
+        top: 24px;
         z-index: 30;
         padding: 10px 14px;
         border: 1px solid var(--border-strong);
@@ -74,12 +78,10 @@
         background: rgba(13, 17, 23, 0.96);
         color: #f0f6fc;
         text-decoration: none;
-        transform: translateY(-150%);
-        transition: transform 0.18s ease;
       }
 
       .skip-link:focus {
-        transform: translateY(16px);
+        left: 24px;
         outline: 2px solid rgba(88, 166, 255, 0.5);
         outline-offset: 2px;
       }
@@ -127,7 +129,7 @@
       }
 
       .metric {
-        padding: 14px 16px;
+        padding: 12px;
         border-radius: 18px;
         border: 1px solid var(--border);
         background:
@@ -152,7 +154,7 @@
       }
 
       .banner {
-        padding: 12px 14px;
+        padding: 12px;
         border-radius: 16px;
         border: 1px solid var(--border);
         background: rgba(22, 27, 34, 0.9);
@@ -190,6 +192,7 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
+        overflow-wrap: break-word;
         border-radius: 22px;
         border: 1px solid var(--border);
         background:
@@ -212,7 +215,7 @@
         align-items: flex-start;
         justify-content: space-between;
         gap: 16px;
-        padding: 18px 20px;
+        padding: 16px;
         border-bottom: 1px solid var(--border);
       }
 
@@ -223,13 +226,13 @@
         min-width: 0;
       }
 
-      .panel-title h2 {
+      .panel-header h2 {
         margin: 0;
-        color: var(--muted);
-        font-size: 0.72rem;
+        color: #8b949e;
+        font-size: 13px;
         font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.12em;
+        letter-spacing: 0.05em;
       }
 
       .panel-title strong {
@@ -279,7 +282,7 @@
         display: flex;
         gap: 10px;
         align-items: center;
-        padding: 0 20px 16px;
+        padding: 0 16px 16px;
       }
 
       .search-row {
@@ -329,14 +332,23 @@
         flex: 1;
         min-height: 0;
         overflow: auto;
-        padding: 18px 20px 20px;
+        padding: 16px;
+      }
+
+      #runs,
+      #detail,
+      #graph,
+      .output-box,
+      pre {
+        scrollbar-width: thin;
+        scrollbar-color: #30363d #0d1117;
       }
 
       .run-item {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         gap: 8px 12px;
-        padding: 16px;
+        padding: 12px;
         margin-bottom: 12px;
         border-radius: 18px;
         border: 1px solid var(--border);
@@ -414,7 +426,7 @@
         position: relative;
         flex: 1;
         min-height: 0;
-        margin: 0 20px 20px;
+        margin: 0 16px 16px;
         overflow: hidden;
         border-radius: 20px;
         border: 1px solid var(--border);
@@ -441,7 +453,13 @@
         height: 100%;
         min-height: 100%;
         overflow: auto;
-        padding: 24px;
+        padding: 16px;
+      }
+
+      #graph svg {
+        display: block;
+        width: 100%;
+        height: auto;
       }
 
       svg.graph-lines {
@@ -455,7 +473,7 @@
       .graph-node {
         position: absolute;
         width: 210px;
-        padding: 14px;
+        padding: 12px;
         border-radius: 16px;
         border: 1px solid var(--border);
         background:
@@ -524,7 +542,7 @@
 
       .summary-card,
       .trace-item {
-        padding: 14px;
+        padding: 12px;
         border-radius: 16px;
         border: 1px solid var(--border);
         background:
@@ -556,13 +574,34 @@
       .trace-item pre {
         margin: 0;
         padding: 12px;
-        border-radius: 12px;
         border: 1px solid rgba(201, 209, 217, 0.08);
         background: rgba(1, 4, 9, 0.84);
         color: var(--text);
         white-space: pre-wrap;
         word-break: break-word;
+      }
+
+      .output-box {
         overflow: auto;
+        border-radius: 12px;
+      }
+
+      pre {
+        max-height: 300px;
+        overflow-y: auto;
+        border-radius: 6px;
+      }
+
+      code {
+        padding: 2px 6px;
+      }
+
+      pre code {
+        padding: 0;
+      }
+
+      pre {
+        overflow-wrap: break-word;
       }
 
       ::-webkit-scrollbar {
@@ -618,14 +657,6 @@
           width: 100%;
         }
 
-        .layout {
-          grid-template-columns: 1fr;
-          grid-template-areas:
-            "history"
-            "graph"
-            "detail";
-        }
-
         .panel-header,
         #runs,
         #detail,
@@ -642,6 +673,16 @@
         .search-row {
           flex-direction: column;
           align-items: stretch;
+        }
+      }
+
+      @media (max-width: 768px) {
+        .layout {
+          grid-template-columns: 1fr;
+          grid-template-areas:
+            "history"
+            "graph"
+            "detail";
         }
       }
 
@@ -668,8 +709,8 @@
     </style>
   </head>
   <body>
-    <a class="skip-link" href="#main-content">Skip to pipeline graph</a>
     <div class="app-shell">
+      <a href="#graph" class="skip-link">Skip to graph</a>
       <header class="topbar">
         <div class="brand">
           <h1>AgentFlow</h1>
@@ -684,7 +725,7 @@
       <div id="banner" class="banner hidden" role="status" aria-label="Application status banner" aria-live="polite" aria-atomic="true"></div>
 
       <div class="layout">
-        <aside class="panel history-panel" role="navigation" aria-label="Run history sidebar">
+        <aside class="panel history-panel" role="navigation" aria-label="Run history">
           <div class="panel-header">
             <div class="panel-title">
               <h2>Run History</h2>
@@ -695,10 +736,10 @@
             <input id="run-search" class="search" type="search" placeholder="Search runs, status, or IDs" aria-label="Search runs by name, status, or ID">
             <button id="refresh-runs" type="button" aria-label="Refresh run history">Refresh</button>
           </div>
-          <div id="runs" role="listbox" aria-label="Run history list"></div>
+          <div id="runs" role="listbox" aria-label="Pipeline runs"></div>
         </aside>
 
-        <section id="main-content" class="panel graph-panel" role="main" tabindex="-1" aria-label="Pipeline execution graph panel">
+        <section id="main-content" class="panel graph-panel" role="main" tabindex="-1" aria-label="Pipeline graph">
           <div class="panel-header">
             <div class="panel-title">
               <h2>Execution Graph</h2>
@@ -729,7 +770,7 @@
           </div>
         </section>
 
-        <aside class="panel detail-panel" role="complementary" aria-label="Node detail panel" aria-live="polite">
+        <aside class="panel detail-panel" role="complementary" aria-label="Node details" aria-live="polite">
           <div class="panel-header">
             <div class="panel-title">
               <h2>Node Detail</h2>
