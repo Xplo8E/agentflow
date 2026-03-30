@@ -95,10 +95,19 @@ def agent_auth_setup(agent: str, env: dict[str, str]) -> str:
     elif agent == "claude":
         api_key = env.get("ANTHROPIC_API_KEY", "")
         if api_key:
+            # Write OAuth credentials file so claude CLI picks it up
+            creds = json.dumps({"claudeAiOauth": {"accessToken": api_key}})
+            parts.append(f"mkdir -p ~/.claude")
+            parts.append(f"echo {shlex.quote(creds)} > ~/.claude/.credentials.json")
+            # Also export env var as fallback
             parts.append(f"export ANTHROPIC_API_KEY={shlex.quote(api_key)}")
+        base_url = env.get("ANTHROPIC_BASE_URL", "")
+        if base_url:
+            parts.append(f"export ANTHROPIC_BASE_URL={shlex.quote(base_url)}")
     elif agent == "kimi":
-        api_key = env.get("KIMI_API_KEY", "")
+        api_key = env.get("KIMI_API_KEY", "") or env.get("MOONSHOT_API_KEY", "")
         if api_key:
             parts.append(f"export KIMI_API_KEY={shlex.quote(api_key)}")
+            parts.append(f"export MOONSHOT_API_KEY={shlex.quote(api_key)}")
 
     return " && ".join(parts) if parts else ""

@@ -115,13 +115,14 @@ def ensure_key_pair(region: str) -> tuple[str, str]:
 def collect_local_credentials(agent: str) -> dict[str, str]:
     """Read local agent credentials and return as env vars.
 
-    Checks config files and environment variables for each agent CLI
-    and returns a dict of env vars to forward to remote targets.
+    Reads config files and environment variables for each agent CLI.
+    Works for codex (auth.json + config.toml), claude (OAuth from
+    .credentials.json), and kimi (env var).
     """
     env: dict[str, str] = {}
 
     if agent in ("codex", "all"):
-        # Check ~/.codex/auth.json
+        # ~/.codex/auth.json
         auth_path = Path.home() / ".codex" / "auth.json"
         if auth_path.exists():
             try:
@@ -130,15 +131,13 @@ def collect_local_credentials(agent: str) -> dict[str, str]:
                     env["OPENAI_API_KEY"] = auth["OPENAI_API_KEY"]
             except (json.JSONDecodeError, OSError):
                 pass
-        # Check ~/.codex/config.toml for base_url
+        # ~/.codex/config.toml for base_url
         config_path = Path.home() / ".codex" / "config.toml"
         if config_path.exists():
             try:
-                config_text = config_path.read_text(encoding="utf-8")
-                for line in config_text.splitlines():
+                for line in config_path.read_text(encoding="utf-8").splitlines():
                     stripped = line.strip()
                     if stripped.startswith("base_url"):
-                        # Parse: base_url = "http://..."
                         _, _, value = stripped.partition("=")
                         value = value.strip().strip('"').strip("'")
                         if value:
@@ -146,18 +145,31 @@ def collect_local_credentials(agent: str) -> dict[str, str]:
                             break
             except OSError:
                 pass
-        # Check environment
         if os.environ.get("OPENAI_API_KEY"):
             env.setdefault("OPENAI_API_KEY", os.environ["OPENAI_API_KEY"])
         if os.environ.get("OPENAI_BASE_URL"):
             env.setdefault("OPENAI_BASE_URL", os.environ["OPENAI_BASE_URL"])
 
     if agent in ("claude", "all"):
+        # ~/.claude/.credentials.json (OAuth token)
+        creds_path = Path.home() / ".claude" / ".credentials.json"
+        if creds_path.exists():
+            try:
+                creds = json.loads(creds_path.read_text(encoding="utf-8"))
+                oauth = creds.get("claudeAiOauth", {})
+                if isinstance(oauth, dict) and oauth.get("accessToken"):
+                    env["ANTHROPIC_API_KEY"] = oauth["accessToken"]
+            except (json.JSONDecodeError, OSError):
+                pass
         if os.environ.get("ANTHROPIC_API_KEY"):
-            env["ANTHROPIC_API_KEY"] = os.environ["ANTHROPIC_API_KEY"]
+            env.setdefault("ANTHROPIC_API_KEY", os.environ["ANTHROPIC_API_KEY"])
+        if os.environ.get("ANTHROPIC_BASE_URL"):
+            env.setdefault("ANTHROPIC_BASE_URL", os.environ["ANTHROPIC_BASE_URL"])
 
     if agent in ("kimi", "all"):
         if os.environ.get("KIMI_API_KEY"):
             env["KIMI_API_KEY"] = os.environ["KIMI_API_KEY"]
+        if os.environ.get("MOONSHOT_API_KEY"):
+            env["MOONSHOT_API_KEY"] = os.environ["MOONSHOT_API_KEY"]
 
     return env

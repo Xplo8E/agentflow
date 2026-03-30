@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from agentflow.agents.registry import AdapterRegistry, default_adapter_registry
 from agentflow.context import render_node_prompt
-from agentflow.prepared import ExecutionPaths, build_execution_paths
+from agentflow.prepared import ExecutionPaths, PreparedExecution, build_execution_paths
 from agentflow.runners.registry import RunnerRegistry, default_runner_registry
 from agentflow.specs import (
     NodeAttempt,
@@ -549,6 +549,17 @@ class Orchestrator:
             result.attempts.append(attempt)
             parser.start_attempt(attempt_number)
             prepared = adapter.prepare(node, prompt, paths)
+            # Forward local credentials to remote targets (SSH, EC2, ECS)
+            if node.target.kind in ("ssh", "ec2", "ecs"):
+                from agentflow.cloud.aws import collect_local_credentials
+                local_creds = collect_local_credentials(node.agent.value)
+                # Merge: explicit node env wins over local creds
+                merged = {**local_creds, **prepared.env}
+                prepared = PreparedExecution(
+                    command=prepared.command, env=merged, cwd=prepared.cwd,
+                    trace_kind=prepared.trace_kind, runtime_files=prepared.runtime_files,
+                    stdin=prepared.stdin,
+                )
             # Inject scratchboard file into runtime_files for remote targets
             if scratchboard is not None and node.target.kind not in ("local",):
                 from agentflow.scratchboard import SCRATCHBOARD_FILENAME
