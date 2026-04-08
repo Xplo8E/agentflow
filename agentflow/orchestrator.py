@@ -841,7 +841,13 @@ class Orchestrator:
             active_cycle_tails: set[str] = set()
             for tail_id in cycle_tail_nodes:
                 iter_key = (run_id, tail_id)
-                if iteration_counts.get(iter_key, 0) < pipeline.max_iterations:
+                tail_status = record.nodes[tail_id].status
+                # A tail is only active if it hasn't succeeded yet AND
+                # still has iterations remaining.
+                if (
+                    tail_status != NodeStatus.COMPLETED
+                    and iteration_counts.get(iter_key, 0) < pipeline.max_iterations
+                ):
                     active_cycle_tails.add(tail_id)
             cycle_downstream: set[str] = set()
             for n in pipeline.nodes:
